@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>PICU 药学监护</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; background: #f5f5f5; color: #333; font-size: 15px; }
+
+/* ── Toolbar ── */
+.toolbar { position: sticky; top: 0; z-index: 100; background: #2563eb; color: #fff; display: flex; align-items: center; padding: 10px 16px; gap: 10px; }
+.toolbar h1 { font-size: 17px; flex: 1; }
+.toolbar button { background: rgba(255,255,255,.2); color: #fff; border: none; border-radius: 6px; padding: 8px 12px; font-size: 13px; cursor: pointer; min-height: 36px; }
+.toolbar button:active { background: rgba(255,255,255,.35); }
+
+/* ── Container ── */
+.container { max-width: 600px; margin: 0 auto; padding: 12px; }
+
+/* ── Upload area ── */
+.upload-area { background: #fff; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 40px 20px; text-align: center; margin-top: 20px; }
+.upload-area.dragover { border-color: #2563eb; background: #eff6ff; }
+.upload-area p { margin-bottom: 16px; color: #64748b; }
+.upload-area label { display: inline-block; background: #2563eb; color: #fff; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 15px; min-height: 44px; line-height: 20px; }
+.upload-area input[type="file"] { display: none; }
+
+/* ── Cards / sections ── */
+.card { background: #fff; border-radius: 10px; padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.card h2 { font-size: 15px; margin-bottom: 10px; color: #1e40af; }
+
+/* ── Search ── */
+.search-input { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 16px; margin-bottom: 10px; }
+
+/* ── Patient list ── */
+.patient-list { max-height: 260px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.patient-item { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; cursor: pointer; display: flex; gap: 8px; align-items: baseline; min-height: 44px; }
+.patient-item:active, .patient-item.selected { background: #eff6ff; }
+.patient-item.selected { border-left: 3px solid #2563eb; }
+.patient-item .bed { font-weight: 600; color: #2563eb; min-width: 36px; }
+.patient-item .name { font-weight: 500; min-width: 48px; }
+.patient-item .id { color: #64748b; font-size: 13px; }
+.patient-item .diag { color: #94a3b8; font-size: 13px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Pill toggles ── */
+.pill-group { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.pill { padding: 7px 14px; border-radius: 20px; border: 1px solid #d1d5db; background: #fff; font-size: 14px; cursor: pointer; min-height: 36px; transition: all .15s; }
+.pill.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+
+/* ── Date input ── */
+.date-input { padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 16px; width: 100%; }
+
+/* ── Textarea ── */
+textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 10px 12px; font-size: 16px; font-family: inherit; resize: vertical; min-height: 100px; }
+
+/* ── Buttons ── */
+.btn { display: block; width: 100%; padding: 14px; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; min-height: 48px; margin-top: 10px; }
+.btn-primary { background: #2563eb; color: #fff; }
+.btn-primary:active { background: #1d4ed8; }
+.btn-primary:disabled { background: #93c5fd; cursor: not-allowed; }
+.btn-success { background: #16a34a; color: #fff; }
+.btn-success:active { background: #15803d; }
+.btn-success:disabled { background: #86efac; cursor: not-allowed; }
+
+/* ── Status / toast ── */
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #1e293b; color: #fff; padding: 12px 20px; border-radius: 8px; font-size: 14px; z-index: 200; opacity: 0; transition: opacity .3s; pointer-events: none; max-width: 90vw; text-align: center; }
+.toast.show { opacity: 1; }
+.toast.error { background: #dc2626; }
+.spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; margin-right: 6px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.hidden { display: none !important; }
+.label { font-size: 13px; color: #64748b; margin-bottom: 4px; }
+.row { display: flex; gap: 10px; align-items: center; }
+</style>
+</head>
+<body>
+
+<!-- Toolbar -->
+<div class="toolbar">
+  <h1>PICU 药学监护</h1>
+  <button id="btnDownload" class="hidden" onclick="downloadFile()">下载</button>
+  <button id="btnReupload" class="hidden" onclick="showUpload()">换文件</button>
+</div>
+
+<!-- Upload view -->
+<div id="viewUpload" class="container">
+  <div class="upload-area" id="dropZone">
+    <p>上传监护工作簿 (.xlsm) 到云端</p>
+    <label for="fileInput">选择文件</label>
+    <input type="file" id="fileInput" accept=".xlsm" onchange="uploadFile(this.files[0])">
+  </div>
+</div>
+
+<!-- Main work view -->
+<div id="viewMain" class="container hidden">
+
+  <!-- Patient selection -->
+  <div class="card">
+    <h2>选择患者</h2>
+    <input class="search-input" id="searchInput" type="text" placeholder="搜索床号、诊断或匿名编号…" oninput="filterPatients()">
+    <div class="patient-list" id="patientList"></div>
+  </div>
+
+  <!-- Level & Type -->
+  <div class="card" id="cardOptions">
+    <div class="label">监护级别</div>
+    <div class="pill-group" id="levelGroup"></div>
+    <div class="label">监护类型</div>
+    <div class="pill-group" id="typeGroup"></div>
+    <div class="label">日期</div>
+    <input class="date-input" id="dateInput" type="date">
+  </div>
+
+  <!-- Raw input -->
+  <div class="card">
+    <h2>查房记录</h2>
+    <textarea id="rawInput" placeholder="输入查房口述记录，如：万古霉素谷浓度15，偏高，建议减量…" rows="4"></textarea>
+    <button class="btn btn-primary" id="btnGenerate" onclick="generateNote()">生成标准记录</button>
+  </div>
+
+  <!-- Preview -->
+  <div class="card hidden" id="cardPreview">
+    <h2>预览 / 编辑</h2>
+    <textarea id="previewText" rows="6"></textarea>
+    <button class="btn btn-success" id="btnSave" onclick="saveNote()">保存到 Excel</button>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+/* ── State ── */
+let patients = [];
+let selectedPatient = null;
+const LEVELS = ["一级监护", "二级监护", "三级监护"];
+const TYPES = ["药学查房", "药物重整", "药学监护", "用药咨询", "用药教育"];
+
+/* ── Init ── */
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("dateInput").value = new Date().toISOString().slice(0, 10);
+  initPills("levelGroup", LEVELS, "二级监护");
+  initPills("typeGroup", TYPES, "药学监护");
+  setupDragDrop();
+  checkWorkbook();
+});
+
+/* ── Drag & drop ── */
+function setupDragDrop() {
+  const zone = document.getElementById("dropZone");
+  zone.addEventListener("dragover", e => { e.preventDefault(); zone.classList.add("dragover"); });
+  zone.addEventListener("dragleave", () => zone.classList.remove("dragover"));
+  zone.addEventListener("drop", e => {
+    e.preventDefault();
+    zone.classList.remove("dragover");
+    const file = e.dataTransfer.files[0];
+    if (file) uploadFile(file);
+  });
+}
+
+/* ── Upload ── */
+async function uploadFile(file) {
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith(".xlsm")) {
+    toast("仅支持 .xlsm 文件", true);
+    return;
+  }
+  const fd = new FormData();
+  fd.append("file", file);
+  toast("上传中…");
+  try {
+    const res = await fetch("/api/upload", { method: "POST", body: fd });
+    const data = await res.json();
+    if (data.error) { toast(data.error, true); return; }
+    toast("上传成功");
+    showMain();
+    loadPatients();
+  } catch (e) { toast("上传失败: " + e.message, true); }
+}
+
+/* ── Check if workbook exists ── */
+async function checkWorkbook() {
+  try {
+    const res = await fetch("/api/patients");
+    const data = await res.json();
+    if (data.patients) {
+      patients = data.patients;
+      showMain();
+      renderPatients();
+    }
+  } catch (_) {}
+}
+
+/* ── Download ── */
+function downloadFile() {
+  window.location.href = "/api/download";
+}
+
+/* ── View switching ── */
+function showUpload() {
+  document.getElementById("viewUpload").classList.remove("hidden");
+  document.getElementById("viewMain").classList.add("hidden");
+  document.getElementById("btnDownload").classList.add("hidden");
+  document.getElementById("btnReupload").classList.add("hidden");
+  document.getElementById("fileInput").value = "";
+}
+
+function showMain() {
+  document.getElementById("viewUpload").classList.add("hidden");
+  document.getElementById("viewMain").classList.remove("hidden");
+  document.getElementById("btnDownload").classList.remove("hidden");
+  document.getElementById("btnReupload").classList.remove("hidden");
+  loadPatients();
+}
+
+/* ── Patients ── */
+async function loadPatients() {
+  try {
+    const res = await fetch("/api/patients");
+    const data = await res.json();
+    if (data.error) { toast(data.error, true); return; }
+    patients = data.patients;
+    renderPatients();
+  } catch (e) { toast("加载患者列表失败", true); }
+}
+
+function renderPatients() {
+  const q = document.getElementById("searchInput").value.trim().toLowerCase();
+  const list = document.getElementById("patientList");
+  const filtered = patients.filter(p =>
+    !q || p.name.toLowerCase().includes(q) ||
+    p.inpatient_no.toLowerCase().includes(q) ||
+    p.bed_no.toLowerCase().includes(q) ||
+    p.diagnosis.toLowerCase().includes(q)
+  );
+  list.innerHTML = filtered.map(p =>
+    `<div class="patient-item ${selectedPatient && selectedPatient.row_idx === p.row_idx ? 'selected' : ''}"
+          onclick="selectPatient(${p.row_idx})">
+      <span class="bed">${p.bed_no || '-'}</span>
+      <span class="name">${p.name}</span>
+      <span class="id">${p.inpatient_no}</span>
+      <span class="diag">${p.diagnosis}</span>
+    </div>`
+  ).join("");
+}
+
+function filterPatients() { renderPatients(); }
+
+function selectPatient(rowIdx) {
+  selectedPatient = patients.find(p => p.row_idx === rowIdx);
+  renderPatients();
+  // Apply previous defaults
+  if (selectedPatient.prev_level) setPill("levelGroup", selectedPatient.prev_level);
+  if (selectedPatient.prev_type) setPill("typeGroup", selectedPatient.prev_type);
+}
+
+/* ── Pills ── */
+function initPills(groupId, options, defaultVal) {
+  const group = document.getElementById(groupId);
+  group.innerHTML = options.map(o =>
+    `<span class="pill ${o === defaultVal ? 'active' : ''}" onclick="togglePill(this, '${groupId}')">${o}</span>`
+  ).join("");
+}
+
+function togglePill(el, groupId) {
+  document.querySelectorAll(`#${groupId} .pill`).forEach(p => p.classList.remove("active"));
+  el.classList.add("active");
+}
+
+function setPill(groupId, value) {
+  document.querySelectorAll(`#${groupId} .pill`).forEach(p => {
+    p.classList.toggle("active", p.textContent === value);
+  });
+}
+
+function getActivePill(groupId) {
+  const el = document.querySelector(`#${groupId} .pill.active`);
+  return el ? el.textContent : "";
+}
+
+/* ── Generate ── */
+async function generateNote() {
+  const raw = document.getElementById("rawInput").value.trim();
+  if (!raw) { toast("请输入查房记录", true); return; }
+
+  const btn = document.getElementById("btnGenerate");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>生成中…';
+
+  let patientInfo = "";
+  if (selectedPatient) {
+    patientInfo = `${selectedPatient.bed_no || "床号未知"}，${selectedPatient.diagnosis}`;
+  }
+
+  try {
+    const res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ raw_text: raw, patient_info: patientInfo }),
+    });
+    const data = await res.json();
+    if (data.error && !data.note) {
+      toast(data.error, true);
+    } else {
+      document.getElementById("previewText").value = data.note;
+      document.getElementById("cardPreview").classList.remove("hidden");
+      if (data.error) toast(data.error, true);
+    }
+  } catch (e) {
+    toast("生成失败: " + e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "生成标准记录";
+  }
+}
+
+/* ── Save ── */
+async function saveNote() {
+  if (!selectedPatient) { toast("请先选择患者", true); return; }
+
+  const noteText = document.getElementById("previewText").value.trim();
+  if (!noteText) { toast("记录内容为空", true); return; }
+
+  const btn = document.getElementById("btnSave");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>保存中…';
+
+  try {
+    const res = await fetch("/api/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        row_idx: selectedPatient.row_idx,
+        note_text: noteText,
+        level: getActivePill("levelGroup"),
+        note_type: getActivePill("typeGroup"),
+        date: document.getElementById("dateInput").value,
+      }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      toast(data.error, true);
+    } else {
+      toast(`已保存到记录${data.slot_index}`);
+      document.getElementById("cardPreview").classList.add("hidden");
+      document.getElementById("rawInput").value = "";
+    }
+  } catch (e) {
+    toast("保存失败: " + e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "保存到 Excel";
+  }
+}
+
+/* ── Toast ── */
+function toast(msg, isError) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className = "toast show" + (isError ? " error" : "");
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.className = "toast", 2500);
+}
+</script>
+</body>
+</html>

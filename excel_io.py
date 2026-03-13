@@ -1,0 +1,209 @@
+"""Excel I/O wrapper for the web layer.
+
+Re-uses functions from the existing CLI scripts while converting
+``SystemExit`` (raised by ``fail()``) into a catchable ``ExcelError``.
+"""
+
+from __future__ import annotations
+
+import threading
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any
+
+import openpyxl
+
+from import_case_list import RECORD_KEYWORD, TEMP_PREFIX
+from write_picu_note_to_excel import (
+    NOTE_SLOTS,
+    LEVEL_OPTIONS,
+    MAX_ROW,
+    START_ROW,
+    TYPE_OPTIONS,
+    PatientRow,
+    format_cell,
+    load_patient_rows,
+    find_previous_defaults,
+    resolve_slot,
+    write_note_to_sheet,
+)
+
+_lock = threading.Lock()
+ID_COLUMN = "D"
+NAME_COLUMN = "F"
+ANON_ID_PREFIX = "ANON-"
+ANON_NAME_PREFIX = "匿名患者"
+
+
+class ExcelError(Exception):
+    """Raised when an Excel operation fails."""
+
+
+def _catch(fn, *args, **kwargs):
+    """Call *fn* and convert ``SystemExit`` into ``ExcelError``."""
+    try:
+        return fn(*args, **kwargs)
+    except SystemExit as exc:
+        raise ExcelError(str(exc)) from exc
+
+
+# ── workbook discovery ──────────────────────────────────────────────
+
+def find_workbook(data_dir: Path) -> Path | None:
+    """Return the first ``.xlsm`` workbook found in *data_dir*, or ``None``."""
+    if not data_dir.is_dir():
+        return None
+    candidates = [
+        p for p in data_dir.iterdir()
+        if p.is_file()
+        and p.suffix.lower() == ".xlsm"
+        and not p.name.startswith(TEMP_PREFIX)
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
+def redact_workbook_identifiers(wb_path: Path) -> bool:
+    """Replace patient name / inpatient number with row-based aliases."""
+    changed = False
+    with _lock:
+        book = openpyxl.load_workbook(wb_path, keep_vba=True)
+        sheet = book[book.sheetnames[0]]
+
+        for row_idx in range(START_ROW, MAX_ROW + 1):
+            raw_id = format_cell(sheet[f"{ID_COLUMN}{row_idx}"].value)
+            raw_name = format_cell(sheet[f"{NAME_COLUMN}{row_idx}"].value)
+            if not raw_id and not raw_name:
+                continue
+
+            alias_num = row_idx - START_ROW + 1
+            masked_id = f"{ANON_ID_PREFIX}{alias_num:04d}"
+            masked_name = f"{ANON_NAME_PREFIX}{alias_num:03d}"
+
+            if raw_id != masked_id:
+                sheet[f"{ID_COLUMN}{row_idx}"] = masked_id
+                changed = True
+            if raw_name != masked_name:
+                sheet[f"{NAME_COLUMN}{row_idx}"] = masked_name
+                changed = True
+
+        if changed:
+            book.save(wb_path)
+        book.close()
+
+    return changed
+
+
+def redact_workbooks(data_dir: Path) -> int:
+    """Redact every workbook in the data directory. Returns changed file count."""
+    if not data_dir.is_dir():
+        return 0
+
+    changed = 0
+    for wb_path in data_dir.iterdir():
+        if (
+            wb_path.is_file()
+            and wb_path.suffix.lower() == ".xlsm"
+            and not wb_path.name.startswith(TEMP_PREFIX)
+        ):
+            if redact_workbook_identifiers(wb_path):
+                changed += 1
+    return changed
+
+
+# ── patient list ────────────────────────────────────────────────────
+
+def list_patients(wb_path: Path) -> list[dict]:
+    """Return a JSON-friendly list of patients with previous defaults."""
+    with _lock:
+        book = openpyxl.load_workbook(wb_path, keep_vba=True, data_only=True)
+        sheet = book[book.sheetnames[0]]
+        patients = load_patient_rows(sheet)
+        result = []
+        for p in patients:
+            prev_level, prev_type = find_previous_defaults(sheet, p)
+            result.append({
+                "row_idx": p.row_idx,
+                "inpatient_no": p.inpatient_no,
+                "bed_no": p.bed_no,
+                "name": p.name,
+                "diagnosis": p.diagnosis,
+                "prev_level": prev_level,
+                "prev_type": prev_type,
+            })
+        book.close()
+    return result
+
+
+# ── slot status ─────────────────────────────────────────────────────
+
+def get_slot_status(wb_path: Path, row_idx: int) -> list[dict]:
+    """Return the occupancy status of all 6 note slots for a given row."""
+    with _lock:
+        book = openpyxl.load_workbook(wb_path, keep_vba=True, data_only=True)
+        sheet = book[book.sheetnames[0]]
+        result = []
+        for slot in NOTE_SLOTS:
+            note_val = format_cell(sheet[f"{slot['note']}{row_idx}"].value)
+            date_val = format_cell(sheet[f"{slot['date']}{row_idx}"].value)
+            result.append({
+                "index": slot["index"],
+                "has_note": bool(note_val),
+                "date": date_val,
+                "preview": note_val[:60] if note_val else "",
+            })
+        book.close()
+    return result
+
+
+# ── save note ───────────────────────────────────────────────────────
+
+def save_note(
+    wb_path: Path,
+    row_idx: int,
+    record_date: date,
+    level: str,
+    note_type: str,
+    note_text: str,
+    overwrite_slot: int | None = None,
+) -> dict:
+    """Write a note into the workbook and return a summary dict."""
+    with _lock:
+        book = openpyxl.load_workbook(wb_path, keep_vba=True)
+        sheet = book[book.sheetnames[0]]
+
+        # Build a minimal PatientRow for the helpers
+        patient = PatientRow(
+            row_idx=row_idx,
+            inpatient_no=format_cell(sheet[f"D{row_idx}"].value),
+            bed_no=format_cell(sheet[f"E{row_idx}"].value),
+            name=format_cell(sheet[f"F{row_idx}"].value),
+            diagnosis=format_cell(sheet[f"K{row_idx}"].value),
+        )
+
+        if not patient.inpatient_no and not patient.name:
+            raise ExcelError(f"行 {row_idx} 没有患者数据。")
+
+        slot = _catch(resolve_slot, sheet, patient, overwrite_slot)
+
+        write_note_to_sheet(
+            sheet=sheet,
+            patient=patient,
+            slot=slot,
+            record_date=record_date,
+            level=level,
+            note_type=note_type,
+            note=note_text,
+        )
+        book.save(wb_path)
+        book.close()
+
+    return {
+        "row_idx": row_idx,
+        "name": patient.name,
+        "slot_index": slot["index"],
+        "date": record_date.isoformat(),
+        "level": level,
+        "note_type": note_type,
+    }

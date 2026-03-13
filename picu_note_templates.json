@@ -1,0 +1,116 @@
+{
+  "templates": [
+    {
+      "id": "abx_review",
+      "name": "抗菌药物评估",
+      "description": "PICU 感染患儿抗菌药物治疗监护。",
+      "default_note_type": "药学监护",
+      "fields": [
+        { "key": "clinical_context", "label": "患儿情况", "default": "患儿因重症感染入住PICU" },
+        { "key": "regimen", "label": "当前用药", "default": "当前抗感染方案为" },
+        { "key": "assessment", "label": "药学分析", "default": "结合感染部位、病原学/培养结果、炎症指标及器官功能评估当前方案" },
+        { "key": "action", "label": "处理措施", "default": "建议根据培养及临床反应动态评估抗菌药物选择、剂量及疗程" },
+        { "key": "follow_up", "label": "结果/计划", "default": "继续监测体温、感染指标、病原学结果及药物相关不良反应" }
+      ],
+      "template": "问题：{clinical_context}，{regimen}。分析：{assessment}。处理：{action}。结果/计划：{follow_up}。"
+    },
+    {
+      "id": "renal_crrt",
+      "name": "肾功能/CRRT 剂量评估",
+      "description": "肾功能异常或接受 CRRT/ECMO 患儿的药物剂量监护。",
+      "default_note_type": "药学监护",
+      "fields": [
+        { "key": "clinical_context", "label": "患儿情况", "default": "患儿目前存在肾功能异常/接受CRRT治疗" },
+        { "key": "regimen", "label": "重点药物", "default": "当前重点关注药物为" },
+        { "key": "assessment", "label": "药学分析", "default": "结合Scr、尿量、CRRT模式及给药间隔评估现有剂量暴露是否充分且安全" },
+        { "key": "action", "label": "处理措施", "default": "建议依据肾功能及CRRT参数调整给药剂量/给药间隔，并关注停机或参数变更后的再评估" },
+        { "key": "follow_up", "label": "结果/计划", "default": "继续监测肾功能、液体出入量、治疗反应及相关药物不良反应" }
+      ],
+      "template": "问题：{clinical_context}，{regimen}。分析：{assessment}。处理：{action}。结果/计划：{follow_up}。"
+    },
+    {
+      "id": "tdm",
+      "name": "TDM/血药浓度监护",
+      "description": "万古霉素、伏立康唑等需监测血药浓度的场景。",
+      "default_note_type": "药学监护",
+      "fields": [
+        { "key": "clinical_context", "label": "患儿情况", "default": "患儿接受需进行血药浓度监测的治疗" },
+        { "key": "regimen", "label": "监测药物/结果", "default": "当前监测药物及浓度结果为" },
+        { "key": "assessment", "label": "药学分析", "default": "结合采血时点、给药方案、感染严重程度及器官功能评估当前暴露水平" },
+        { "key": "action", "label": "处理措施", "default": "建议根据目标暴露范围调整给药剂量/间隔，并规范下一次采血时点" },
+        { "key": "follow_up", "label": "结果/计划", "default": "继续监测疗效、不良反应及复测血药浓度结果" }
+      ],
+      "template": "问题：{clinical_context}，{regimen}。分析：{assessment}。处理：{action}。结果/计划：{follow_up}。"
+    },
+    {
+      "id": "adr",
+      "name": "不良反应监护",
+      "description": "疑似药物不良反应的识别、处理与随访。",
+      "default_note_type": "药学监护",
+      "fields": [
+        { "key": "clinical_context", "label": "不良反应情况", "default": "患儿治疗过程中出现疑似药物不良反应" },
+        { "key": "regimen", "label": "可疑药物", "default": "重点关注可疑药物为" },
+        { "key": "assessment", "label": "药学分析", "default": "结合事件发生时间、临床表现、用药史及伴随疾病评估药物相关性和严重程度" },
+        { "key": "action", "label": "处理措施", "default": "建议停用/调整可疑药物，给予对症处理，并完善必要监测" },
+        { "key": "follow_up", "label": "结果/计划", "default": "继续观察症状变化，评估处理后转归，并记录上报相关信息" }
+      ],
+      "template": "问题：{clinical_context}，{regimen}。分析：{assessment}。处理：{action}。结果/计划：{follow_up}。"
+    },
+    {
+      "id": "interaction",
+      "name": "相互作用评估",
+      "description": "联用多种药物时的相互作用风险监护。",
+      "default_note_type": "药学监护",
+      "fields": [
+        { "key": "clinical_context", "label": "联合用药情况", "default": "患儿当前存在多药联合治疗" },
+        { "key": "regimen", "label": "重点联用药物", "default": "重点关注联用药物为" },
+        { "key": "assessment", "label": "药学分析", "default": "结合相互作用机制、严重程度及患儿器官功能评估联合用药风险" },
+        { "key": "action", "label": "处理措施", "default": "建议优化给药方案/监测指标，必要时调整药物选择、剂量或给药时机" },
+        { "key": "follow_up", "label": "结果/计划", "default": "继续监测疗效及相关不良反应，动态评估联用必要性" }
+      ],
+      "template": "问题：{clinical_context}，{regimen}。分析：{assessment}。处理：{action}。结果/计划：{follow_up}。"
+    },
+    {
+      "id": "sedation_analgesia",
+      "name": "镇静镇痛监护",
+      "description": "机械通气、镇静镇痛、肌松等 PICU 常见场景。",
+      "default_note_type": "药学监护",
+      "fields": [
+        { "key": "clinical_context", "label": "患儿情况", "default": "患儿目前处于机械通气/重症支持治疗阶段" },
+        { "key": "regimen", "label": "镇静镇痛方案", "default": "当前镇静镇痛相关用药为" },
+        { "key": "assessment", "label": "药学分析", "default": "结合镇静评分、疼痛控制、循环呼吸状态及肝肾功能评估当前方案有效性与安全性" },
+        { "key": "action", "label": "处理措施", "default": "建议根据目标镇静深度和患儿反应动态调整药物剂量，关注累积、撤药及不良反应" },
+        { "key": "follow_up", "label": "结果/计划", "default": "继续监测镇静评分、生命体征及撤机/撤药过程中的症状变化" }
+      ],
+      "template": "问题：{clinical_context}，{regimen}。分析：{assessment}。处理：{action}。结果/计划：{follow_up}。"
+    },
+    {
+      "id": "nutrition",
+      "name": "营养支持评估",
+      "description": "肠内/肠外营养、微量元素和液体治疗相关监护。",
+      "default_note_type": "药学监护",
+      "fields": [
+        { "key": "clinical_context", "label": "营养支持情况", "default": "患儿目前接受肠内/肠外营养支持" },
+        { "key": "regimen", "label": "当前方案", "default": "当前营养相关治疗方案为" },
+        { "key": "assessment", "label": "药学分析", "default": "结合体重、喂养耐受、液体摄入、电解质及血糖等指标评估当前方案" },
+        { "key": "action", "label": "处理措施", "default": "建议根据能量与蛋白需求、液体限制及监测指标优化营养支持方案" },
+        { "key": "follow_up", "label": "结果/计划", "default": "继续监测体重变化、胃肠道耐受、电解质、血糖及肝功能等指标" }
+      ],
+      "template": "问题：{clinical_context}，{regimen}。分析：{assessment}。处理：{action}。结果/计划：{follow_up}。"
+    },
+    {
+      "id": "infusion_compatibility",
+      "name": "输注/配伍评估",
+      "description": "持续泵入、静脉通路紧张、配伍禁忌等场景。",
+      "default_note_type": "药学监护",
+      "fields": [
+        { "key": "clinical_context", "label": "输注情况", "default": "患儿当前存在多种静脉药物持续/序贯输注" },
+        { "key": "regimen", "label": "重点药物", "default": "重点关注输注药物及组合为" },
+        { "key": "assessment", "label": "药学分析", "default": "结合药物理化性质、输注速度、配伍资料及通路情况评估稳定性与安全性" },
+        { "key": "action", "label": "处理措施", "default": "建议优化输注顺序、溶媒、浓度或通路分配，必要时分开输注" },
+        { "key": "follow_up", "label": "结果/计划", "default": "继续监测输注通路情况、药物疗效及局部/全身不良反应" }
+      ],
+      "template": "问题：{clinical_context}，{regimen}。分析：{assessment}。处理：{action}。结果/计划：{follow_up}。"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: picu-pharmacy
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_BASE_URL
+        value: https://openrouter.ai/api/v1
+      - key: OPENAI_MODEL
+        value: anthropic/claude-sonnet-4-6
+      - key: DATA_DIR
+        value: /data
+    disk:
+      name: picu-data
+      mountPath: /data
+      sizeGB: 1
