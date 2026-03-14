@@ -38,6 +38,10 @@ class PatientRow:
     inpatient_no: str
     bed_no: str
     name: str
+    age: str
+    sex: str
+    weight: str
+    admission_date: str
     diagnosis: str
 
 
@@ -127,6 +131,10 @@ def load_patient_rows(sheet: openpyxl.worksheet.worksheet.Worksheet) -> list[Pat
                 inpatient_no=inpatient_no,
                 bed_no=format_cell(sheet[f"E{row_idx}"].value),
                 name=name,
+                age=format_cell(sheet[f"G{row_idx}"].value),
+                sex=format_cell(sheet[f"H{row_idx}"].value),
+                weight=format_cell(sheet[f"I{row_idx}"].value),
+                admission_date=format_cell(sheet[f"J{row_idx}"].value),
                 diagnosis=format_cell(sheet[f"K{row_idx}"].value),
             )
         )

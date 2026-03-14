@@ -33,13 +33,16 @@ body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; backgrou
 
 /* ── Patient list ── */
 .patient-list { max-height: 260px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-.patient-item { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; cursor: pointer; display: flex; gap: 8px; align-items: baseline; min-height: 44px; }
+.patient-item { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; cursor: pointer; min-height: 44px; }
 .patient-item:active, .patient-item.selected { background: #eff6ff; }
 .patient-item.selected { border-left: 3px solid #2563eb; }
+.patient-main { display: flex; gap: 8px; align-items: baseline; }
 .patient-item .bed { font-weight: 600; color: #2563eb; min-width: 36px; }
 .patient-item .name { font-weight: 500; min-width: 48px; }
 .patient-item .id { color: #64748b; font-size: 13px; }
 .patient-item .diag { color: #94a3b8; font-size: 13px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.patient-meta { margin-top: 4px; color: #64748b; font-size: 12px; line-height: 1.4; }
+.patient-summary { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: #eff6ff; color: #1e3a8a; font-size: 13px; line-height: 1.5; }
 
 /* ── Pill toggles ── */
 .pill-group { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
@@ -99,6 +102,7 @@ textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 
     <h2>选择患者</h2>
     <input class="search-input" id="searchInput" type="text" placeholder="搜索床号、诊断或匿名编号…" oninput="filterPatients()">
     <div class="patient-list" id="patientList"></div>
+    <div class="patient-summary hidden" id="patientSummary"></div>
   </div>
 
   <!-- Level & Type -->
@@ -221,6 +225,7 @@ async function loadPatients() {
     if (data.error) { toast(data.error, true); return; }
     patients = data.patients;
     renderPatients();
+    updatePatientSummary();
   } catch (e) { toast("加载患者列表失败", true); }
 }
 
@@ -231,15 +236,22 @@ function renderPatients() {
     !q || p.name.toLowerCase().includes(q) ||
     p.inpatient_no.toLowerCase().includes(q) ||
     p.bed_no.toLowerCase().includes(q) ||
-    p.diagnosis.toLowerCase().includes(q)
+    p.diagnosis.toLowerCase().includes(q) ||
+    (p.age || "").toLowerCase().includes(q) ||
+    (p.sex || "").toLowerCase().includes(q) ||
+    (p.weight || "").toLowerCase().includes(q) ||
+    (p.admission_date || "").toLowerCase().includes(q)
   );
   list.innerHTML = filtered.map(p =>
     `<div class="patient-item ${selectedPatient && selectedPatient.row_idx === p.row_idx ? 'selected' : ''}"
           onclick="selectPatient(${p.row_idx})">
-      <span class="bed">${p.bed_no || '-'}</span>
-      <span class="name">${p.name}</span>
-      <span class="id">${p.inpatient_no}</span>
-      <span class="diag">${p.diagnosis}</span>
+      <div class="patient-main">
+        <span class="bed">${p.bed_no || '-'}</span>
+        <span class="name">${p.name}</span>
+        <span class="id">${p.inpatient_no}</span>
+        <span class="diag">${p.diagnosis}</span>
+      </div>
+      <div class="patient-meta">${formatPatientMeta(p)}</div>
     </div>`
   ).join("");
 }
@@ -249,9 +261,59 @@ function filterPatients() { renderPatients(); }
 function selectPatient(rowIdx) {
   selectedPatient = patients.find(p => p.row_idx === rowIdx);
   renderPatients();
+  updatePatientSummary();
   // Apply previous defaults
   if (selectedPatient.prev_level) setPill("levelGroup", selectedPatient.prev_level);
   if (selectedPatient.prev_type) setPill("typeGroup", selectedPatient.prev_type);
+}
+
+function formatPatientMeta(patient) {
+  const fields = [];
+  if (patient.age) fields.push(`年龄 ${patient.age}`);
+  if (patient.sex) fields.push(`性别 ${patient.sex}`);
+  if (patient.weight) fields.push(`体重 ${patient.weight} kg`);
+  if (patient.admission_date) fields.push(`入院 ${patient.admission_date}`);
+  return fields.join(" | ") || "暂无更多患者信息";
+}
+
+function updatePatientSummary() {
+  const el = document.getElementById("patientSummary");
+  if (!selectedPatient) {
+    el.classList.add("hidden");
+    el.textContent = "";
+    return;
+  }
+
+  const parts = [
+    selectedPatient.name || "未命名患者",
+    selectedPatient.bed_no ? `床号 ${selectedPatient.bed_no}` : "",
+    selectedPatient.inpatient_no ? `住院号 ${selectedPatient.inpatient_no}` : "",
+    selectedPatient.age ? `年龄 ${selectedPatient.age}` : "",
+    selectedPatient.sex ? `性别 ${selectedPatient.sex}` : "",
+    selectedPatient.weight ? `体重 ${selectedPatient.weight} kg` : "",
+    selectedPatient.admission_date ? `入院日期 ${selectedPatient.admission_date}` : "",
+    selectedPatient.diagnosis ? `诊断 ${selectedPatient.diagnosis}` : "",
+  ].filter(Boolean);
+
+  el.textContent = parts.join(" | ");
+  el.classList.remove("hidden");
+}
+
+function buildPatientInfoText(patient) {
+  if (!patient) return "";
+
+  const parts = [
+    patient.bed_no ? `床号：${patient.bed_no}` : "",
+    patient.name ? `姓名：${patient.name}` : "",
+    patient.inpatient_no ? `住院号：${patient.inpatient_no}` : "",
+    patient.age ? `年龄：${patient.age}` : "",
+    patient.sex ? `性别：${patient.sex}` : "",
+    patient.weight ? `体重：${patient.weight}kg` : "",
+    patient.admission_date ? `入院日期：${patient.admission_date}` : "",
+    patient.diagnosis ? `诊断：${patient.diagnosis}` : "",
+  ].filter(Boolean);
+
+  return parts.join("，");
 }
 
 /* ── Pills ── */
@@ -289,7 +351,7 @@ async function generateNote() {
 
   let patientInfo = "";
   if (selectedPatient) {
-    patientInfo = `${selectedPatient.bed_no || "床号未知"}，${selectedPatient.diagnosis}`;
+    patientInfo = buildPatientInfoText(selectedPatient);
   }
 
   try {

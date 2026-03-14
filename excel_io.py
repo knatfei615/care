@@ -6,10 +6,13 @@ Re-uses functions from the existing CLI scripts while converting
 
 from __future__ import annotations
 
+import json
+import shutil
 import threading
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import openpyxl
 
@@ -32,6 +35,7 @@ _lock = threading.Lock()
 ID_COLUMN = "D"
 NAME_COLUMN = "F"
 ANON_ID_PREFIX = "ANON-"
+TEMP_EXPORT_PREFIX = "~export-"
 ANON_NAME_PREFIX = "匿名患者"
 
 
@@ -47,6 +51,63 @@ def _catch(fn, *args, **kwargs):
         raise ExcelError(str(exc)) from exc
 
 
+def _identifier_backup_path(wb_path: Path) -> Path:
+    return wb_path.with_name(f"{wb_path.stem}.identifiers.json")
+
+
+def backup_workbook_identifiers(wb_path: Path) -> Path:
+    """Persist original patient identifiers so downloads can restore them."""
+    with _lock:
+        book = openpyxl.load_workbook(wb_path, keep_vba=True, data_only=False)
+        sheet = book[book.sheetnames[0]]
+        rows: dict[str, dict[str, str]] = {}
+
+        for row_idx in range(START_ROW, MAX_ROW + 1):
+            raw_id = format_cell(sheet[f"{ID_COLUMN}{row_idx}"].value)
+            raw_name = format_cell(sheet[f"{NAME_COLUMN}{row_idx}"].value)
+            if not raw_id and not raw_name:
+                continue
+            rows[str(row_idx)] = {
+                "inpatient_no": raw_id,
+                "name": raw_name,
+            }
+
+        book.close()
+
+    backup_path = _identifier_backup_path(wb_path)
+    backup_path.write_text(
+        json.dumps({"rows": rows}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return backup_path
+
+
+def prepare_download_workbook(wb_path: Path) -> Path:
+    """Create a temporary workbook copy with original identifiers restored."""
+    backup_path = _identifier_backup_path(wb_path)
+    if not backup_path.exists():
+        raise ExcelError("未找到原始姓名/住院号备份，当前文件无法恢复下载。请重新上传原始工作簿。")
+
+    backup_data = json.loads(backup_path.read_text(encoding="utf-8"))
+    rows = backup_data.get("rows", {})
+    export_path = wb_path.with_name(f"{TEMP_EXPORT_PREFIX}{uuid4().hex}-{wb_path.name}")
+    shutil.copy2(wb_path, export_path)
+
+    with _lock:
+        book = openpyxl.load_workbook(export_path, keep_vba=True)
+        sheet = book[book.sheetnames[0]]
+
+        for row_idx_text, values in rows.items():
+            row_idx = int(row_idx_text)
+            sheet[f"{ID_COLUMN}{row_idx}"] = values.get("inpatient_no", "")
+            sheet[f"{NAME_COLUMN}{row_idx}"] = values.get("name", "")
+
+        book.save(export_path)
+        book.close()
+
+    return export_path
+
+
 # ── workbook discovery ──────────────────────────────────────────────
 
 def find_workbook(data_dir: Path) -> Path | None:
@@ -58,6 +119,7 @@ def find_workbook(data_dir: Path) -> Path | None:
         if p.is_file()
         and p.suffix.lower() == ".xlsm"
         and not p.name.startswith(TEMP_PREFIX)
+        and not p.name.startswith(TEMP_EXPORT_PREFIX)
     ]
     if not candidates:
         return None
@@ -106,6 +168,7 @@ def redact_workbooks(data_dir: Path) -> int:
             wb_path.is_file()
             and wb_path.suffix.lower() == ".xlsm"
             and not wb_path.name.startswith(TEMP_PREFIX)
+            and not wb_path.name.startswith(TEMP_EXPORT_PREFIX)
         ):
             if redact_workbook_identifiers(wb_path):
                 changed += 1
@@ -128,6 +191,10 @@ def list_patients(wb_path: Path) -> list[dict]:
                 "inpatient_no": p.inpatient_no,
                 "bed_no": p.bed_no,
                 "name": p.name,
+                "age": p.age,
+                "sex": p.sex,
+                "weight": p.weight,
+                "admission_date": p.admission_date,
                 "diagnosis": p.diagnosis,
                 "prev_level": prev_level,
                 "prev_type": prev_type,
@@ -179,6 +246,10 @@ def save_note(
             inpatient_no=format_cell(sheet[f"D{row_idx}"].value),
             bed_no=format_cell(sheet[f"E{row_idx}"].value),
             name=format_cell(sheet[f"F{row_idx}"].value),
+            age=format_cell(sheet[f"G{row_idx}"].value),
+            sex=format_cell(sheet[f"H{row_idx}"].value),
+            weight=format_cell(sheet[f"I{row_idx}"].value),
+            admission_date=format_cell(sheet[f"J{row_idx}"].value),
             diagnosis=format_cell(sheet[f"K{row_idx}"].value),
         )
 

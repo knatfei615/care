@@ -5,14 +5,16 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, after_this_request, jsonify, render_template, request, send_file
 
 from config import DATA_DIR, MAX_UPLOAD_MB, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, PORT
 from excel_io import (
+    backup_workbook_identifiers,
     ExcelError,
     find_workbook,
     get_slot_status,
     list_patients,
+    prepare_download_workbook,
     redact_workbook_identifiers,
     redact_workbooks,
     save_note,
@@ -48,6 +50,7 @@ def upload():
 
     dest = DATA_DIR / file.filename
     file.save(str(dest))
+    backup_workbook_identifiers(dest)
     redact_workbook_identifiers(dest)
     return jsonify(ok=True, filename=file.filename)
 
@@ -58,7 +61,20 @@ def download():
     wb = find_workbook(DATA_DIR)
     if not wb:
         return jsonify(error="云端没有工作簿，请先上传。"), 404
-    return send_file(str(wb), as_attachment=True, download_name=wb.name)
+    try:
+        export_wb = prepare_download_workbook(wb)
+    except ExcelError as exc:
+        return jsonify(error=str(exc)), 400
+
+    @after_this_request
+    def cleanup_export(response):
+        try:
+            export_wb.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return response
+
+    return send_file(str(export_wb), as_attachment=True, download_name=wb.name)
 
 
 # ── Patients ────────────────────────────────────────────────────────

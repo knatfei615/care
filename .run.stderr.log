@@ -1,0 +1,62 @@
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://198.18.0.1:5000
+Press CTRL+C to quit
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 892-975-438
+127.0.0.1 - - [14/Mar/2026 10:11:05] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [14/Mar/2026 10:11:14] "GET /api/patients HTTP/1.1" 200 -
+127.0.0.1 - - [14/Mar/2026 10:13:45] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [14/Mar/2026 10:13:45] "GET /api/patients HTTP/1.1" 200 -
+127.0.0.1 - - [14/Mar/2026 10:13:46] "GET /api/patients HTTP/1.1" 200 -
+127.0.0.1 - - [14/Mar/2026 10:14:34] "POST /api/generate HTTP/1.1" 200 -
+127.0.0.1 - - [14/Mar/2026 10:14:43] "POST /api/save HTTP/1.1" 200 -
+127.0.0.1 - - [14/Mar/2026 10:14:47] "GET /api/download HTTP/1.1" 200 -
+ * Detected change in 'E:\\care\\care\\excel_io.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 892-975-438
+ * Detected change in 'E:\\care\\care\\excel_io.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 892-975-438
+ * Detected change in 'E:\\care\\care\\app.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 892-975-438
+ * Detected change in 'E:\\care\\care\\app.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 892-975-438
+ * Detected change in 'E:\\care\\care\\app.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 892-975-438
+ * Detected change in 'E:\\care\\care\\app.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 892-975-438
+ * Detected change in 'E:\\care\\care\\excel_io.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 892-975-438
+ * Detected change in 'E:\\care\\care\\excel_io.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 892-975-438
+ * Detected change in 'E:\\care\\care\\excel_io.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 892-975-438
+127.0.0.1 - - [14/Mar/2026 10:20:27] "GET /api/download HTTP/1.1" 400 -
+127.0.0.1 - - [14/Mar/2026 10:22:45] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [14/Mar/2026 10:22:45] "GET /api/patients HTTP/1.1" 200 -
+127.0.0.1 - - [14/Mar/2026 10:22:46] "GET /api/patients HTTP/1.1" 200 -
+127.0.0.1 - - [14/Mar/2026 10:22:53] "POST /api/upload HTTP/1.1" 200 -
+127.0.0.1 - - [14/Mar/2026 10:22:54] "GET /api/patients HTTP/1.1" 200 -
+127.0.0.1 - - [14/Mar/2026 10:22:54] "GET /api/patients HTTP/1.1" 200 -
+127.0.0.1 - - [14/Mar/2026 10:23:23] "POST /api/generate HTTP/1.1" 200 -
+127.0.0.1 - - [14/Mar/2026 10:23:29] "POST /api/save HTTP/1.1" 200 -
+127.0.0.1 - - [14/Mar/2026 10:23:32] "GET /api/download HTTP/1.1" 200 -
