@@ -63,7 +63,7 @@ def structure_note(
         if _validate(note):
             return {"note": note, "error": None}
 
-        # First attempt failed validation – retry with correction hint
+        # First attempt failed validation – retry with correction hint 2222
         if attempt == 0:
             messages.append({"role": "assistant", "content": note})
             messages.append({
