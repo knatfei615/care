@@ -11,3 +11,5 @@ OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "anthropic/claude-sonnet-4-6")
 DATA_DIR = Path(os.environ.get("DATA_DIR", "./data"))
 PORT = int(os.environ.get("PORT", "5000"))
 MAX_UPLOAD_MB = 10
+BASIC_AUTH_USER = os.environ.get("BASIC_AUTH_USER", "")
+BASIC_AUTH_PASS = os.environ.get("BASIC_AUTH_PASS", "")

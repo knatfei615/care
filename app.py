@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hmac
 from datetime import datetime
-from pathlib import Path
 
-from flask import Flask, after_this_request, jsonify, render_template, request, send_file
+from flask import Flask, Response, after_this_request, jsonify, render_template, request, send_file
 
-from config import DATA_DIR, MAX_UPLOAD_MB, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, PORT
+from config import (
+    BASIC_AUTH_PASS,
+    BASIC_AUTH_USER,
+    DATA_DIR,
+    MAX_UPLOAD_MB,
+    OPENAI_API_KEY,
+    OPENAI_BASE_URL,
+    OPENAI_MODEL,
+    PORT,
+)
 from excel_io import (
     backup_workbook_identifiers,
     ExcelError,
@@ -25,9 +36,60 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
 
 
+def _unauthorized_response() -> Response:
+    return Response(
+        "Unauthorized",
+        401,
+        {"WWW-Authenticate": 'Basic realm="PICU Pharmacy"'},
+    )
+
+
+def _is_authorized() -> bool:
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Basic "):
+        return False
+
+    token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        return False
+
+    try:
+        decoded = base64.b64decode(token).decode("utf-8")
+    except (ValueError, binascii.Error, UnicodeDecodeError):
+        return False
+
+    username, sep, password = decoded.partition(":")
+    if not sep:
+        return False
+
+    return hmac.compare_digest(username, BASIC_AUTH_USER) and hmac.compare_digest(password, BASIC_AUTH_PASS)
+
+
+@app.before_request
+def require_basic_auth():
+    if request.path == "/healthz":
+        return None
+
+    if bool(BASIC_AUTH_USER) ^ bool(BASIC_AUTH_PASS):
+        return jsonify(error="服务器鉴权配置不完整，请同时设置 BASIC_AUTH_USER 和 BASIC_AUTH_PASS。"), 500
+
+    if not BASIC_AUTH_USER and not BASIC_AUTH_PASS:
+        return jsonify(error="服务器未启用访问控制。"), 500
+
+    if _is_authorized():
+        return None
+
+    return _unauthorized_response()
+
+
 def _ensure_data_dir() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     redact_workbooks(DATA_DIR)
+
+
+@app.route("/healthz")
+def healthz():
+    return jsonify(ok=True)
 
 
 # ── Pages ───────────────────────────────────────────────────────────
