@@ -2,27 +2,28 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
-import hmac
 from datetime import datetime
+from pathlib import Path
 
-from flask import Flask, Response, after_this_request, jsonify, render_template, request, send_file
+from flask import Flask, after_this_request, jsonify, render_template, request, send_file
+from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
 
 from config import (
-    BASIC_AUTH_PASS,
-    BASIC_AUTH_USER,
     DATA_DIR,
     MAX_UPLOAD_MB,
     OPENAI_API_KEY,
     OPENAI_BASE_URL,
     OPENAI_MODEL,
     PORT,
+    SECRET_KEY,
+    SQLALCHEMY_DATABASE_URI,
+    ADMIN_USERNAME,
+    ADMIN_PASSWORD,
 )
 from excel_io import (
-    backup_workbook_identifiers,
     ExcelError,
+    backup_workbook_identifiers,
     find_workbook,
     get_slot_status,
     list_patients,
@@ -32,60 +33,33 @@ from excel_io import (
     save_note,
 )
 from llm import structure_note
+from models import db, init_db, login_manager
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
+app.config["SECRET_KEY"] = SECRET_KEY
+app.config["SQLALCHEMY_DATABASE_URI"] = SQLALCHEMY_DATABASE_URI
+
+db.init_app(app)
+login_manager.init_app(app)
+
+from admin import admin_bp  # noqa: E402
+from auth import auth_bp  # noqa: E402
+
+app.register_blueprint(auth_bp)
+app.register_blueprint(admin_bp)
 
 
-def _unauthorized_response() -> Response:
-    return Response(
-        "Unauthorized",
-        401,
-        {"WWW-Authenticate": 'Basic realm="PICU Pharmacy"'},
-    )
+def _user_data_dir() -> Path:
+    """Return the data directory scoped to the current logged-in user."""
+    return DATA_DIR / "users" / str(current_user.id)
 
 
-def _is_authorized() -> bool:
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Basic "):
-        return False
-
-    token = auth_header.split(" ", 1)[1].strip()
-    if not token:
-        return False
-
-    try:
-        decoded = base64.b64decode(token).decode("utf-8")
-    except (ValueError, binascii.Error, UnicodeDecodeError):
-        return False
-
-    username, sep, password = decoded.partition(":")
-    if not sep:
-        return False
-
-    return hmac.compare_digest(username, BASIC_AUTH_USER) and hmac.compare_digest(password, BASIC_AUTH_PASS)
-
-
-@app.before_request
-def require_basic_auth():
-    if request.path == "/healthz":
-        return None
-
-    if bool(BASIC_AUTH_USER) ^ bool(BASIC_AUTH_PASS):
-        return jsonify(error="服务器鉴权配置不完整，请同时设置 BASIC_AUTH_USER 和 BASIC_AUTH_PASS。"), 500
-
-    if not BASIC_AUTH_USER and not BASIC_AUTH_PASS:
-        return jsonify(error="服务器未启用访问控制。"), 500
-
-    if _is_authorized():
-        return None
-
-    return _unauthorized_response()
-
-
-def _ensure_data_dir() -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    redact_workbooks(DATA_DIR)
+def _ensure_user_dir() -> Path:
+    d = _user_data_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    redact_workbooks(d)
+    return d
 
 
 @app.route("/healthz")
@@ -96,6 +70,7 @@ def healthz():
 # ── Pages ───────────────────────────────────────────────────────────
 
 @app.route("/")
+@login_required
 def index():
     return render_template("index.html")
 
@@ -103,8 +78,9 @@ def index():
 # ── Upload / Download ──────────────────────────────────────────────
 
 @app.route("/api/upload", methods=["POST"])
+@login_required
 def upload():
-    _ensure_data_dir()
+    user_dir = _ensure_user_dir()
     file = request.files.get("file")
     if not file or not file.filename:
         return jsonify(error="未选择文件。"), 400
@@ -112,7 +88,7 @@ def upload():
     if not filename or not filename.lower().endswith(".xlsm"):
         return jsonify(error="仅支持 .xlsm 文件。"), 400
 
-    dest = DATA_DIR / filename
+    dest = user_dir / filename
     file.save(str(dest))
     backup_workbook_identifiers(dest)
     redact_workbook_identifiers(dest)
@@ -120,9 +96,10 @@ def upload():
 
 
 @app.route("/api/download")
+@login_required
 def download():
-    _ensure_data_dir()
-    wb = find_workbook(DATA_DIR)
+    user_dir = _ensure_user_dir()
+    wb = find_workbook(user_dir)
     if not wb:
         return jsonify(error="云端没有工作簿，请先上传。"), 404
     try:
@@ -144,9 +121,10 @@ def download():
 # ── Patients ────────────────────────────────────────────────────────
 
 @app.route("/api/patients")
+@login_required
 def patients():
-    _ensure_data_dir()
-    wb = find_workbook(DATA_DIR)
+    user_dir = _ensure_user_dir()
+    wb = find_workbook(user_dir)
     if not wb:
         return jsonify(error="云端没有工作簿，请先上传。"), 404
     try:
@@ -159,6 +137,7 @@ def patients():
 # ── Generate (LLM) ─────────────────────────────────────────────────
 
 @app.route("/api/generate", methods=["POST"])
+@login_required
 def generate():
     if not OPENAI_API_KEY:
         return jsonify(error="服务器未配置 OPENAI_API_KEY。"), 500
@@ -177,9 +156,10 @@ def generate():
 # ── Save to Excel ──────────────────────────────────────────────────
 
 @app.route("/api/save", methods=["POST"])
+@login_required
 def save():
-    _ensure_data_dir()
-    wb = find_workbook(DATA_DIR)
+    user_dir = _ensure_user_dir()
+    wb = find_workbook(user_dir)
     if not wb:
         return jsonify(error="云端没有工作簿，请先上传。"), 404
 
@@ -210,9 +190,10 @@ def save():
 # ── Slot status ─────────────────────────────────────────────────────
 
 @app.route("/api/slots/<int:row_idx>")
+@login_required
 def slots(row_idx):
-    _ensure_data_dir()
-    wb = find_workbook(DATA_DIR)
+    user_dir = _ensure_user_dir()
+    wb = find_workbook(user_dir)
     if not wb:
         return jsonify(error="云端没有工作簿，请先上传。"), 404
     try:
@@ -222,8 +203,22 @@ def slots(row_idx):
     return jsonify(slots=status)
 
 
+# ── User info API (for frontend) ───────────────────────────────────
+
+@app.route("/api/me")
+@login_required
+def me():
+    return jsonify(
+        username=current_user.username,
+        display_name=current_user.display_name,
+        role=current_user.role,
+    )
+
+
 # ── Main ────────────────────────────────────────────────────────────
 
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+init_db(app)
+
 if __name__ == "__main__":
-    _ensure_data_dir()
     app.run(host="0.0.0.0", port=PORT, debug=True)

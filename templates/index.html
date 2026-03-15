@@ -81,8 +81,11 @@ textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 
 <!-- Toolbar -->
 <div class="toolbar">
   <h1>PICU 药学监护</h1>
+  <span id="userDisplay" style="font-size:13px;opacity:.85"></span>
+  <a id="btnAdmin" class="hidden" href="/admin/users" style="background:rgba(255,255,255,.2);color:#fff;border:none;border-radius:6px;padding:8px 12px;font-size:13px;text-decoration:none;min-height:36px;display:inline-flex;align-items:center;">管理</a>
   <button id="btnDownload" class="hidden" onclick="downloadFile()">下载</button>
   <button id="btnReupload" class="hidden" onclick="showUpload()">换文件</button>
+  <button onclick="location.href='/logout'" style="background:rgba(255,255,255,.15)">退出</button>
 </div>
 
 <!-- Upload view -->
@@ -147,7 +150,17 @@ document.addEventListener("DOMContentLoaded", () => {
   initPills("typeGroup", TYPES, "药学监护");
   setupDragDrop();
   checkWorkbook();
+  loadUserInfo();
 });
+
+async function loadUserInfo() {
+  try {
+    const res = await fetch("/api/me");
+    const data = await res.json();
+    document.getElementById("userDisplay").textContent = data.display_name || data.username;
+    if (data.role === "admin") document.getElementById("btnAdmin").classList.remove("hidden");
+  } catch (_) {}
+}
 
 /* ── Drag & drop ── */
 function setupDragDrop() {
