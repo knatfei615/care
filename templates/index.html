@@ -137,6 +137,8 @@ textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 
 <div class="toast" id="toast"></div>
 
 <script>
+const csrfToken = "{{ csrf_token() }}";
+
 /* ── State ── */
 let patients = [];
 let selectedPatient = null;
@@ -186,7 +188,7 @@ async function uploadFile(file) {
   fd.append("file", file);
   toast("上传中…");
   try {
-    const res = await fetch("/api/upload", { method: "POST", body: fd });
+    const res = await fetch("/api/upload", { method: "POST", headers: withCsrfHeaders(), body: fd });
     const data = await res.json();
     if (data.error) { toast(data.error, true); return; }
     toast("上传成功");
@@ -370,7 +372,7 @@ async function generateNote() {
   try {
     const res = await fetch("/api/generate", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: withCsrfHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ raw_text: raw, patient_info: patientInfo }),
     });
     const data = await res.json();
@@ -403,7 +405,7 @@ async function saveNote() {
   try {
     const res = await fetch("/api/save", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: withCsrfHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         row_idx: selectedPatient.row_idx,
         note_text: noteText,
@@ -429,6 +431,10 @@ async function saveNote() {
 }
 
 /* ── Toast ── */
+function withCsrfHeaders(headers = {}) {
+  return { "X-CSRFToken": csrfToken, ...headers };
+}
+
 function toast(msg, isError) {
   const el = document.getElementById("toast");
   el.textContent = msg;

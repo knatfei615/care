@@ -34,6 +34,7 @@ body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; backgrou
   {% endfor %}
   {% endwith %}
   <form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="field">
       <label for="username">用户名</label>
       <input id="username" name="username" type="text" autocomplete="username" required autofocus>
