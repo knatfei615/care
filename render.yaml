@@ -13,9 +13,11 @@ services:
         value: anthropic/claude-sonnet-4-6
       - key: DATA_DIR
         value: /data
-      - key: BASIC_AUTH_USER
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ADMIN_USERNAME
         sync: false
-      - key: BASIC_AUTH_PASS
+      - key: ADMIN_PASSWORD
         sync: false
     disk:
       name: picu-data

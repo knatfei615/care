@@ -60,3 +60,7 @@ Press CTRL+C to quit
 127.0.0.1 - - [14/Mar/2026 10:23:23] "POST /api/generate HTTP/1.1" 200 -
 127.0.0.1 - - [14/Mar/2026 10:23:29] "POST /api/save HTTP/1.1" 200 -
 127.0.0.1 - - [14/Mar/2026 10:23:32] "GET /api/download HTTP/1.1" 200 -
+ * Detected change in 'E:\\care\\care\\llm.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 892-975-438
