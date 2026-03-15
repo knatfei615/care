@@ -8,6 +8,7 @@ import hmac
 from datetime import datetime
 
 from flask import Flask, Response, after_this_request, jsonify, render_template, request, send_file
+from werkzeug.utils import secure_filename
 
 from config import (
     BASIC_AUTH_PASS,
@@ -107,14 +108,15 @@ def upload():
     file = request.files.get("file")
     if not file or not file.filename:
         return jsonify(error="未选择文件。"), 400
-    if not file.filename.lower().endswith(".xlsm"):
+    filename = secure_filename(file.filename)
+    if not filename or not filename.lower().endswith(".xlsm"):
         return jsonify(error="仅支持 .xlsm 文件。"), 400
 
-    dest = DATA_DIR / file.filename
+    dest = DATA_DIR / filename
     file.save(str(dest))
     backup_workbook_identifiers(dest)
     redact_workbook_identifiers(dest)
-    return jsonify(ok=True, filename=file.filename)
+    return jsonify(ok=True, filename=filename)
 
 
 @app.route("/api/download")
