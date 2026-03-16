@@ -58,6 +58,7 @@ body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; backgrou
   <div class="card">
     <h2>创建用户</h2>
     <form method="POST" action="{{ url_for('admin.create_user') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="field">
         <label>用户名</label>
         <input name="username" type="text" required>
@@ -105,6 +106,7 @@ body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; backgrou
           <td>
             <div class="actions">
               <form class="inline-form" method="POST" action="{{ url_for('admin.reset_password', user_id=u.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="reset-row">
                   <input name="password" type="password" placeholder="新密码" required>
                   <button class="btn-sm btn-muted" type="submit">重置密码</button>
@@ -112,6 +114,7 @@ body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; backgrou
               </form>
               {% if u.id != current_user.id %}
               <form class="inline-form" method="POST" action="{{ url_for('admin.delete_user', user_id=u.id) }}" onsubmit="return confirm('确定删除用户 {{ u.username }}？')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button class="btn-sm btn-danger" type="submit">删除</button>
               </form>
               {% endif %}
