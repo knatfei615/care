@@ -25,6 +25,7 @@ from excel_io import (
     ExcelError,
     backup_workbook_identifiers,
     find_workbook,
+    get_slot_detail,
     get_slot_status,
     list_patients,
     prepare_download_workbook,
@@ -201,6 +202,20 @@ def slots(row_idx):
     except ExcelError as exc:
         return jsonify(error=str(exc)), 400
     return jsonify(slots=status)
+
+
+@app.route("/api/slots/<int:row_idx>/<int:slot_index>")
+@login_required
+def slot_detail(row_idx, slot_index):
+    user_dir = _ensure_user_dir()
+    wb = find_workbook(user_dir)
+    if not wb:
+        return jsonify(error="云端没有工作簿，请先上传。"), 404
+    try:
+        detail = get_slot_detail(wb, row_idx, slot_index)
+    except ExcelError as exc:
+        return jsonify(error=str(exc)), 400
+    return jsonify(slot=detail)
 
 
 # ── User info API (for frontend) ───────────────────────────────────
