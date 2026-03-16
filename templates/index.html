@@ -140,9 +140,10 @@ textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 
 
   <!-- Raw input -->
   <div class="card">
-    <h2>查房记录</h2>
+    <h2>查房记录（可选）</h2>
+    <div class="label">可先输入查房口述后使用 AI 生成标准记录，也可直接在下方手动填写监护意见。</div>
     <textarea id="rawInput" placeholder="输入查房口述记录，如：万古霉素谷浓度15，偏高，建议减量…" rows="4"></textarea>
-    <button class="btn btn-primary" id="btnGenerate" onclick="generateNote()">生成标准记录</button>
+    <button class="btn btn-primary" id="btnGenerate" onclick="generateNote()">AI 生成标准记录（可选）</button>
   </div>
 
   <!-- Preview -->
@@ -540,7 +541,7 @@ async function generateNote() {
     toast("生成失败: " + e.message, true);
   } finally {
     btn.disabled = false;
-    btn.textContent = "生成标准记录";
+    btn.textContent = "AI 生成标准记录（可选）";
   }
 }
 
