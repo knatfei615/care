@@ -7,7 +7,7 @@ from pathlib import Path
 
 from flask import Flask, after_this_request, jsonify, render_template, request, send_file
 from flask_login import current_user, login_required
-from flask_wtf.csrf import CSRFProtect
+from flask_wtf.csrf import CSRFProtect, generate_csrf
 from werkzeug.utils import secure_filename
 
 from config import (
@@ -26,6 +26,7 @@ from excel_io import (
     ExcelError,
     backup_workbook_identifiers,
     find_workbook,
+    get_slot_detail,
     get_slot_status,
     list_patients,
     prepare_download_workbook,
@@ -51,6 +52,12 @@ from auth import auth_bp  # noqa: E402
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(admin_bp)
+
+
+@app.context_processor
+def inject_csrf_token():
+    """Always expose csrf_token() in templates."""
+    return {"csrf_token": generate_csrf}
 
 
 def _user_data_dir() -> Path:
@@ -204,6 +211,20 @@ def slots(row_idx):
     except ExcelError as exc:
         return jsonify(error=str(exc)), 400
     return jsonify(slots=status)
+
+
+@app.route("/api/slots/<int:row_idx>/<int:slot_index>")
+@login_required
+def slot_detail(row_idx, slot_index):
+    user_dir = _ensure_user_dir()
+    wb = find_workbook(user_dir)
+    if not wb:
+        return jsonify(error="云端没有工作簿，请先上传。"), 404
+    try:
+        detail = get_slot_detail(wb, row_idx, slot_index)
+    except ExcelError as exc:
+        return jsonify(error=str(exc)), 400
+    return jsonify(slot=detail)
 
 
 # ── User info API (for frontend) ───────────────────────────────────

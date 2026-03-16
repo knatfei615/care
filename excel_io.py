@@ -205,11 +205,35 @@ def list_patients(wb_path: Path) -> list[dict]:
 
 # ── slot status ─────────────────────────────────────────────────────
 
+def _load_patient_row(sheet, row_idx: int) -> PatientRow:
+    """Load and validate patient row data from worksheet."""
+    if row_idx < START_ROW or row_idx > MAX_ROW:
+        raise ExcelError(f"行号超出范围（{START_ROW}-{MAX_ROW}）。")
+
+    patient = PatientRow(
+        row_idx=row_idx,
+        inpatient_no=format_cell(sheet[f"D{row_idx}"].value),
+        bed_no=format_cell(sheet[f"E{row_idx}"].value),
+        name=format_cell(sheet[f"F{row_idx}"].value),
+        age=format_cell(sheet[f"G{row_idx}"].value),
+        sex=format_cell(sheet[f"H{row_idx}"].value),
+        weight=format_cell(sheet[f"I{row_idx}"].value),
+        admission_date=format_cell(sheet[f"J{row_idx}"].value),
+        diagnosis=format_cell(sheet[f"K{row_idx}"].value),
+    )
+
+    if not patient.inpatient_no and not patient.name:
+        raise ExcelError(f"行 {row_idx} 没有患者数据。")
+
+    return patient
+
+
 def get_slot_status(wb_path: Path, row_idx: int) -> list[dict]:
     """Return the occupancy status of all 6 note slots for a given row."""
     with _lock:
         book = openpyxl.load_workbook(wb_path, keep_vba=True, data_only=True)
         sheet = book[book.sheetnames[0]]
+        _load_patient_row(sheet, row_idx)
         result = []
         for slot in NOTE_SLOTS:
             note_val = format_cell(sheet[f"{slot['note']}{row_idx}"].value)
@@ -222,6 +246,33 @@ def get_slot_status(wb_path: Path, row_idx: int) -> list[dict]:
             })
         book.close()
     return result
+
+
+def get_slot_detail(wb_path: Path, row_idx: int, slot_index: int) -> dict:
+    """Return the full content of one note slot for a given patient row."""
+    slot = next((s for s in NOTE_SLOTS if s["index"] == slot_index), None)
+    if not slot:
+        raise ExcelError("记录槽位必须为 1-6。")
+
+    with _lock:
+        book = openpyxl.load_workbook(wb_path, keep_vba=True, data_only=True)
+        sheet = book[book.sheetnames[0]]
+        _load_patient_row(sheet, row_idx)
+
+        note_val = format_cell(sheet[f"{slot['note']}{row_idx}"].value)
+        date_val = format_cell(sheet[f"{slot['date']}{row_idx}"].value)
+        level_val = format_cell(sheet[f"{slot['level']}{row_idx}"].value)
+        type_val = format_cell(sheet[f"{slot['type']}{row_idx}"].value)
+        book.close()
+
+    return {
+        "index": slot["index"],
+        "has_note": bool(note_val),
+        "date": date_val,
+        "level": level_val,
+        "note_type": type_val,
+        "note": note_val,
+    }
 
 
 # ── save note ───────────────────────────────────────────────────────
@@ -239,22 +290,7 @@ def save_note(
     with _lock:
         book = openpyxl.load_workbook(wb_path, keep_vba=True)
         sheet = book[book.sheetnames[0]]
-
-        # Build a minimal PatientRow for the helpers
-        patient = PatientRow(
-            row_idx=row_idx,
-            inpatient_no=format_cell(sheet[f"D{row_idx}"].value),
-            bed_no=format_cell(sheet[f"E{row_idx}"].value),
-            name=format_cell(sheet[f"F{row_idx}"].value),
-            age=format_cell(sheet[f"G{row_idx}"].value),
-            sex=format_cell(sheet[f"H{row_idx}"].value),
-            weight=format_cell(sheet[f"I{row_idx}"].value),
-            admission_date=format_cell(sheet[f"J{row_idx}"].value),
-            diagnosis=format_cell(sheet[f"K{row_idx}"].value),
-        )
-
-        if not patient.inpatient_no and not patient.name:
-            raise ExcelError(f"行 {row_idx} 没有患者数据。")
+        patient = _load_patient_row(sheet, row_idx)
 
         slot = _catch(resolve_slot, sheet, patient, overwrite_slot)
 

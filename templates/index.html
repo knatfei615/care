@@ -43,6 +43,19 @@ body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; backgrou
 .patient-item .diag { color: #94a3b8; font-size: 13px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .patient-meta { margin-top: 4px; color: #64748b; font-size: 12px; line-height: 1.4; }
 .patient-summary { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: #eff6ff; color: #1e3a8a; font-size: 13px; line-height: 1.5; }
+.history-list { display: flex; flex-direction: column; gap: 8px; }
+.history-item { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; background: #fff; }
+.history-item.empty { background: #f8fafc; color: #94a3b8; }
+.history-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; gap: 10px; }
+.history-title { font-weight: 600; color: #1e293b; font-size: 14px; }
+.history-meta { color: #64748b; font-size: 12px; }
+.history-preview { color: #334155; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.history-item.empty .history-preview { color: #94a3b8; }
+.btn-small { border: 1px solid #2563eb; color: #2563eb; background: #eff6ff; border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; min-height: 30px; }
+.btn-small:disabled { border-color: #cbd5e1; color: #94a3b8; background: #f8fafc; cursor: not-allowed; }
+.edit-banner { margin-bottom: 8px; border-radius: 8px; padding: 8px 10px; font-size: 13px; background: #fff7ed; color: #9a3412; border: 1px solid #fdba74; }
+.btn-muted { background: #475569; color: #fff; }
+.btn-muted:active { background: #334155; }
 
 /* ── Pill toggles ── */
 .pill-group { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
@@ -108,6 +121,13 @@ textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 
     <div class="patient-summary hidden" id="patientSummary"></div>
   </div>
 
+  <!-- History -->
+  <div class="card">
+    <h2>既往监护记录</h2>
+    <div class="label" id="historyHint">请选择患者后查看记录</div>
+    <div class="history-list" id="historyList"></div>
+  </div>
+
   <!-- Level & Type -->
   <div class="card" id="cardOptions">
     <div class="label">监护级别</div>
@@ -129,8 +149,10 @@ textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 
   <!-- Preview -->
   <div class="card" id="cardPreview">
     <h2>监护意见（可手动编辑）</h2>
+    <div id="editBanner" class="edit-banner hidden"></div>
     <textarea id="previewText" rows="6"></textarea>
     <button class="btn btn-success" id="btnSave" onclick="saveNote()">保存到 Excel</button>
+    <button class="btn btn-muted hidden" id="btnCancelEdit" onclick="cancelEditing()">取消编辑模式</button>
   </div>
 </div>
 
@@ -143,6 +165,8 @@ const csrfToken = "{{ csrf_token() }}";
 /* ── State ── */
 let patients = [];
 let selectedPatient = null;
+let slotStatuses = [];
+let editingSlot = null;
 const LEVELS = ["一级监护", "二级监护", "三级监护"];
 const TYPES = ["药学查房", "药物重整", "药学监护", "用药咨询", "用药教育"];
 
@@ -151,6 +175,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("dateInput").value = new Date().toISOString().slice(0, 10);
   initPills("levelGroup", LEVELS, "二级监护");
   initPills("typeGroup", TYPES, "药学监护");
+  refreshEditingState();
   setupDragDrop();
   checkWorkbook();
   loadUserInfo();
@@ -240,8 +265,18 @@ async function loadPatients() {
     const data = await res.json();
     if (data.error) { toast(data.error, true); return; }
     patients = data.patients;
+    if (selectedPatient) {
+      selectedPatient = patients.find(p => p.row_idx === selectedPatient.row_idx) || null;
+    }
     renderPatients();
     updatePatientSummary();
+    if (selectedPatient) {
+      loadSlotStatuses();
+    } else {
+      slotStatuses = [];
+      document.getElementById("historyHint").textContent = "请选择患者后查看记录";
+      document.getElementById("historyList").innerHTML = "";
+    }
   } catch (e) { toast("加载患者列表失败", true); }
 }
 
@@ -276,11 +311,129 @@ function filterPatients() { renderPatients(); }
 
 function selectPatient(rowIdx) {
   selectedPatient = patients.find(p => p.row_idx === rowIdx);
+  clearEditingState();
   renderPatients();
   updatePatientSummary();
+  loadSlotStatuses();
   // Apply previous defaults
   if (selectedPatient.prev_level) setPill("levelGroup", selectedPatient.prev_level);
   if (selectedPatient.prev_type) setPill("typeGroup", selectedPatient.prev_type);
+}
+
+async function loadSlotStatuses() {
+  const hintEl = document.getElementById("historyHint");
+  const listEl = document.getElementById("historyList");
+  if (!selectedPatient) {
+    slotStatuses = [];
+    hintEl.textContent = "请选择患者后查看记录";
+    listEl.innerHTML = "";
+    return;
+  }
+
+  hintEl.textContent = "正在加载既往记录…";
+  listEl.innerHTML = "";
+  try {
+    const res = await fetch(`/api/slots/${selectedPatient.row_idx}`);
+    const data = await res.json();
+    if (data.error) {
+      slotStatuses = [];
+      hintEl.textContent = "加载既往记录失败";
+      toast(data.error, true);
+      return;
+    }
+    slotStatuses = data.slots || [];
+    hintEl.textContent = "点击“编辑”可回填并修改既往记录";
+    renderSlotStatuses();
+  } catch (_) {
+    slotStatuses = [];
+    hintEl.textContent = "加载既往记录失败";
+    toast("加载既往记录失败", true);
+  }
+}
+
+function renderSlotStatuses() {
+  const listEl = document.getElementById("historyList");
+  if (!selectedPatient) {
+    listEl.innerHTML = "";
+    return;
+  }
+  if (!slotStatuses.length) {
+    listEl.innerHTML = `<div class="history-item empty"><div class="history-preview">暂无可显示的记录</div></div>`;
+    return;
+  }
+
+  listEl.innerHTML = slotStatuses.map(slot => {
+    const previewText = slot.has_note ? escapeHtml(slot.preview || "") : "该槽位暂无记录";
+    const dateText = slot.date ? escapeHtml(slot.date) : "无日期";
+    return `<div class="history-item ${slot.has_note ? "" : "empty"}">
+      <div class="history-head">
+        <div>
+          <div class="history-title">记录 ${slot.index}</div>
+          <div class="history-meta">${dateText}</div>
+        </div>
+        <button class="btn-small" onclick="editSlot(${slot.index})" ${slot.has_note ? "" : "disabled"}>编辑</button>
+      </div>
+      <div class="history-preview">${previewText}</div>
+    </div>`;
+  }).join("");
+}
+
+async function editSlot(slotIndex) {
+  if (!selectedPatient) {
+    toast("请先选择患者", true);
+    return;
+  }
+  try {
+    const res = await fetch(`/api/slots/${selectedPatient.row_idx}/${slotIndex}`);
+    const data = await res.json();
+    if (data.error) {
+      toast(data.error, true);
+      return;
+    }
+    const slot = data.slot || {};
+    if (!slot.has_note) {
+      toast("该记录为空，无法编辑", true);
+      return;
+    }
+
+    document.getElementById("dateInput").value = (slot.date || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
+    if (slot.level) setPill("levelGroup", slot.level);
+    if (slot.note_type) setPill("typeGroup", slot.note_type);
+    document.getElementById("previewText").value = slot.note || "";
+
+    editingSlot = slotIndex;
+    refreshEditingState();
+    toast(`已加载记录${slotIndex}，保存将覆盖该记录`);
+  } catch (_) {
+    toast("加载记录详情失败", true);
+  }
+}
+
+function cancelEditing() {
+  clearEditingState();
+  toast("已退出编辑模式");
+}
+
+function clearEditingState() {
+  editingSlot = null;
+  refreshEditingState();
+}
+
+function refreshEditingState() {
+  const bannerEl = document.getElementById("editBanner");
+  const btnSave = document.getElementById("btnSave");
+  const btnCancel = document.getElementById("btnCancelEdit");
+  if (editingSlot) {
+    bannerEl.textContent = `当前正在编辑记录 ${editingSlot}，点击保存会覆盖该条历史记录。`;
+    bannerEl.classList.remove("hidden");
+    btnSave.textContent = `覆盖保存到记录${editingSlot}`;
+    btnCancel.classList.remove("hidden");
+  } else {
+    bannerEl.textContent = "";
+    bannerEl.classList.add("hidden");
+    btnSave.textContent = "保存到 Excel";
+    btnCancel.classList.add("hidden");
+  }
 }
 
 function formatPatientMeta(patient) {
@@ -400,34 +553,43 @@ async function saveNote() {
   if (!noteText) { toast("记录内容为空", true); return; }
 
   const btn = document.getElementById("btnSave");
+  const currentEditingSlot = editingSlot;
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span>保存中…';
 
   try {
+    const payload = {
+      row_idx: selectedPatient.row_idx,
+      note_text: noteText,
+      level: getActivePill("levelGroup"),
+      note_type: getActivePill("typeGroup"),
+      date: document.getElementById("dateInput").value,
+    };
+    if (currentEditingSlot) {
+      payload.overwrite_slot = currentEditingSlot;
+    }
+
     const res = await fetch("/api/save", {
       method: "POST",
       headers: withCsrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({
-        row_idx: selectedPatient.row_idx,
-        note_text: noteText,
-        level: getActivePill("levelGroup"),
-        note_type: getActivePill("typeGroup"),
-        date: document.getElementById("dateInput").value,
-      }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
     if (data.error) {
       toast(data.error, true);
     } else {
-      toast(`已保存到记录${data.slot_index}`);
+      toast(currentEditingSlot ? `已覆盖记录${data.slot_index}` : `已保存到记录${data.slot_index}`);
       document.getElementById("rawInput").value = "";
       document.getElementById("previewText").value = "";
+      clearEditingState();
+      loadSlotStatuses();
+      loadPatients();
     }
   } catch (e) {
     toast("保存失败: " + e.message, true);
   } finally {
     btn.disabled = false;
-    btn.textContent = "保存到 Excel";
+    refreshEditingState();
   }
 }
 
@@ -442,6 +604,15 @@ function toast(msg, isError) {
   el.className = "toast show" + (isError ? " error" : "");
   clearTimeout(el._timer);
   el._timer = setTimeout(() => el.className = "toast", 2500);
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 </script>
 </body>
