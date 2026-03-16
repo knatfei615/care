@@ -7,6 +7,7 @@ from pathlib import Path
 
 from flask import Flask, after_this_request, jsonify, render_template, request, send_file
 from flask_login import current_user, login_required
+from flask_wtf.csrf import CSRFProtect, generate_csrf
 from werkzeug.utils import secure_filename
 
 from config import (
@@ -37,18 +38,26 @@ from llm import structure_note
 from models import db, init_db, login_manager
 
 app = Flask(__name__)
+csrf = CSRFProtect()
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
 app.config["SECRET_KEY"] = SECRET_KEY
 app.config["SQLALCHEMY_DATABASE_URI"] = SQLALCHEMY_DATABASE_URI
 
 db.init_app(app)
 login_manager.init_app(app)
+csrf.init_app(app)
 
 from admin import admin_bp  # noqa: E402
 from auth import auth_bp  # noqa: E402
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(admin_bp)
+
+
+@app.context_processor
+def inject_csrf_token():
+    """Always expose csrf_token() in templates."""
+    return {"csrf_token": generate_csrf}
 
 
 def _user_data_dir() -> Path:

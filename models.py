@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from flask_login import LoginManager, UserMixin
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import inspect, text
 from werkzeug.security import check_password_hash, generate_password_hash
 
 db = SQLAlchemy()
@@ -44,7 +45,27 @@ def init_db(app) -> None:
     """Create tables and seed admin user if configured."""
     with app.app_context():
         db.create_all()
+        _migrate_users_table()
         _seed_admin(app)
+
+
+def _migrate_users_table() -> None:
+    """Best-effort migration for legacy SQLite users schema."""
+    inspector = inspect(db.engine)
+    if "users" not in inspector.get_table_names():
+        return
+
+    columns = {col["name"] for col in inspector.get_columns("users")}
+    ddl_by_column = {
+        "display_name": "ALTER TABLE users ADD COLUMN display_name VARCHAR(80) DEFAULT ''",
+        "role": "ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'user'",
+        "created_at": "ALTER TABLE users ADD COLUMN created_at DATETIME",
+    }
+
+    with db.engine.begin() as conn:
+        for column, ddl in ddl_by_column.items():
+            if column not in columns:
+                conn.execute(text(ddl))
 
 
 def _seed_admin(app) -> None:
