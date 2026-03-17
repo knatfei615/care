@@ -83,6 +83,28 @@ def backup_workbook_identifiers(wb_path: Path) -> Path:
     return backup_path
 
 
+def upsert_backup_identifier_row(wb_path: Path, row_idx: int, inpatient_no: str, name: str) -> Path:
+    """Update one row in identifier backup without rewriting existing rows."""
+    backup_path = _identifier_backup_path(wb_path)
+    rows: dict[str, dict[str, str]] = {}
+    if backup_path.exists():
+        try:
+            backup_data = json.loads(backup_path.read_text(encoding="utf-8"))
+            rows = backup_data.get("rows", {})
+        except (json.JSONDecodeError, OSError):
+            rows = {}
+
+    rows[str(row_idx)] = {
+        "inpatient_no": inpatient_no,
+        "name": name,
+    }
+    backup_path.write_text(
+        json.dumps({"rows": rows}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return backup_path
+
+
 def prepare_download_workbook(wb_path: Path) -> Path:
     """Create a temporary workbook copy with original identifiers restored."""
     backup_path = _identifier_backup_path(wb_path)
@@ -249,7 +271,12 @@ def add_patient(wb_path: Path, payload: dict[str, Any]) -> dict[str, Any]:
         book.save(wb_path)
         book.close()
 
-    backup_workbook_identifiers(wb_path)
+    upsert_backup_identifier_row(
+        wb_path=wb_path,
+        row_idx=target_row,
+        inpatient_no=row_data["D"],
+        name=row_data["F"],
+    )
     redact_workbook_identifiers(wb_path)
 
     return {

@@ -300,6 +300,7 @@ async function loadPatients() {
     if (pendingSelectRowIdx !== null) {
       selectedPatient = patients.find(p => p.row_idx === pendingSelectRowIdx) || null;
       pendingSelectRowIdx = null;
+      clearEditingState();
     }
     if (selectedPatient) {
       selectedPatient = patients.find(p => p.row_idx === selectedPatient.row_idx) || null;
