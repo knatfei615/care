@@ -23,6 +23,7 @@ from config import (
     ADMIN_PASSWORD,
 )
 from excel_io import (
+    add_patient,
     ExcelError,
     backup_workbook_identifiers,
     find_workbook,
@@ -142,6 +143,23 @@ def patients():
     except ExcelError as exc:
         return jsonify(error=str(exc)), 400
     return jsonify(patients=rows)
+
+
+@app.route("/api/patients", methods=["POST"])
+@login_required
+def add_patient_api():
+    user_dir = _ensure_user_dir()
+    wb = find_workbook(user_dir)
+    if not wb:
+        return jsonify(error="云端没有工作簿，请先上传。"), 404
+
+    data = request.get_json(silent=True) or {}
+    try:
+        patient = add_patient(wb, data)
+    except ExcelError as exc:
+        return jsonify(error=str(exc)), 400
+
+    return jsonify(ok=True, patient=patient)
 
 
 # ── Generate (LLM) ─────────────────────────────────────────────────

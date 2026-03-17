@@ -34,6 +34,7 @@ from write_picu_note_to_excel import (
 _lock = threading.Lock()
 ID_COLUMN = "D"
 NAME_COLUMN = "F"
+BASE_COLUMNS = ("A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K")
 ANON_ID_PREFIX = "ANON-"
 TEMP_EXPORT_PREFIX = "~export-"
 ANON_NAME_PREFIX = "匿名患者"
@@ -201,6 +202,70 @@ def list_patients(wb_path: Path) -> list[dict]:
             })
         book.close()
     return result
+
+
+def _clean_patient_payload(payload: dict[str, Any]) -> dict[str, str]:
+    """Normalize manual patient payload from request JSON."""
+    return {
+        "A": format_cell(payload.get("department")),
+        "B": format_cell(payload.get("pharmacist")),
+        "C": format_cell(payload.get("employee_id")),
+        "D": format_cell(payload.get("inpatient_no")),
+        "E": format_cell(payload.get("bed_no")),
+        "F": format_cell(payload.get("name")),
+        "G": format_cell(payload.get("age")),
+        "H": format_cell(payload.get("sex")),
+        "I": format_cell(payload.get("weight")),
+        "J": format_cell(payload.get("admission_date")),
+        "K": format_cell(payload.get("diagnosis")),
+    }
+
+
+def add_patient(wb_path: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    """Append one patient base-info row into A-K columns."""
+    row_data = _clean_patient_payload(payload)
+    if not row_data["D"] and not row_data["F"]:
+        raise ExcelError("住院号和姓名不能同时为空。")
+
+    target_row: int | None = None
+    with _lock:
+        book = openpyxl.load_workbook(wb_path, keep_vba=True)
+        sheet = book[book.sheetnames[0]]
+
+        for row_idx in range(START_ROW, MAX_ROW + 1):
+            inpatient_no = format_cell(sheet[f"D{row_idx}"].value)
+            name = format_cell(sheet[f"F{row_idx}"].value)
+            if not inpatient_no and not name:
+                target_row = row_idx
+                break
+
+        if target_row is None:
+            book.close()
+            raise ExcelError(f"患者区域已满（{START_ROW}-{MAX_ROW} 行）。")
+
+        for column in BASE_COLUMNS:
+            sheet[f"{column}{target_row}"] = row_data[column]
+
+        book.save(wb_path)
+        book.close()
+
+    backup_workbook_identifiers(wb_path)
+    redact_workbook_identifiers(wb_path)
+
+    return {
+        "row_idx": target_row,
+        "department": row_data["A"],
+        "pharmacist": row_data["B"],
+        "employee_id": row_data["C"],
+        "inpatient_no": row_data["D"],
+        "bed_no": row_data["E"],
+        "name": row_data["F"],
+        "age": row_data["G"],
+        "sex": row_data["H"],
+        "weight": row_data["I"],
+        "admission_date": row_data["J"],
+        "diagnosis": row_data["K"],
+    }
 
 
 # ── slot status ─────────────────────────────────────────────────────

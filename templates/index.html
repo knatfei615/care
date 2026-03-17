@@ -27,6 +27,14 @@ body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; backgrou
 /* ── Cards / sections ── */
 .card { background: #fff; border-radius: 10px; padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
 .card h2 { font-size: 15px; margin-bottom: 10px; color: #1e40af; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.card-head h2 { margin-bottom: 0; }
+.btn-outline { border: 1px solid #2563eb; color: #2563eb; background: #fff; border-radius: 8px; padding: 7px 10px; font-size: 13px; cursor: pointer; min-height: 34px; }
+.add-form { margin-bottom: 10px; padding: 10px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field input { width: 100%; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; }
+.field-full { grid-column: 1 / -1; }
 
 /* ── Search ── */
 .search-input { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 16px; margin-bottom: 10px; }
@@ -115,7 +123,30 @@ textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 
 
   <!-- Patient selection -->
   <div class="card">
-    <h2>选择患者</h2>
+    <div class="card-head">
+      <h2>选择患者</h2>
+      <button class="btn-outline" onclick="toggleAddPatientForm()">+ 添加患者</button>
+    </div>
+    <div class="add-form hidden" id="addPatientForm">
+      <div class="label">手动添加患者（A-C 可选；住院号允许重复）</div>
+      <div class="form-grid">
+        <div class="field"><span class="label">科室（A，可选）</span><input id="addDepartment" type="text"></div>
+        <div class="field"><span class="label">药师（B，可选）</span><input id="addPharmacist" type="text"></div>
+        <div class="field"><span class="label">工号（C，可选）</span><input id="addEmployeeId" type="text"></div>
+        <div class="field"><span class="label">住院号（D）</span><input id="addInpatientNo" type="text"></div>
+        <div class="field"><span class="label">床号（E）</span><input id="addBedNo" type="text"></div>
+        <div class="field"><span class="label">姓名（F）</span><input id="addName" type="text"></div>
+        <div class="field"><span class="label">年龄（G）</span><input id="addAge" type="text"></div>
+        <div class="field"><span class="label">性别（H）</span><input id="addSex" type="text"></div>
+        <div class="field"><span class="label">体重kg（I）</span><input id="addWeight" type="text"></div>
+        <div class="field"><span class="label">入院日期（J）</span><input id="addAdmissionDate" type="date"></div>
+        <div class="field field-full"><span class="label">入院诊断（K）</span><input id="addDiagnosis" type="text"></div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn-outline" onclick="submitAddPatient()">提交新增</button>
+        <button class="btn-outline" onclick="closeAddPatientForm()">取消</button>
+      </div>
+    </div>
     <input class="search-input" id="searchInput" type="text" placeholder="搜索床号、诊断或匿名编号…" oninput="filterPatients()">
     <div class="patient-list" id="patientList"></div>
     <div class="patient-summary hidden" id="patientSummary"></div>
@@ -167,6 +198,7 @@ let patients = [];
 let selectedPatient = null;
 let slotStatuses = [];
 let editingSlot = null;
+let pendingSelectRowIdx = null;
 const LEVELS = ["一级监护", "二级监护", "三级监护"];
 const TYPES = ["药学查房", "药物重整", "药学监护", "用药咨询", "用药教育"];
 
@@ -265,6 +297,10 @@ async function loadPatients() {
     const data = await res.json();
     if (data.error) { toast(data.error, true); return; }
     patients = data.patients;
+    if (pendingSelectRowIdx !== null) {
+      selectedPatient = patients.find(p => p.row_idx === pendingSelectRowIdx) || null;
+      pendingSelectRowIdx = null;
+    }
     if (selectedPatient) {
       selectedPatient = patients.find(p => p.row_idx === selectedPatient.row_idx) || null;
     }
@@ -278,6 +314,74 @@ async function loadPatients() {
       document.getElementById("historyList").innerHTML = "";
     }
   } catch (e) { toast("加载患者列表失败", true); }
+}
+
+function toggleAddPatientForm() {
+  document.getElementById("addPatientForm").classList.toggle("hidden");
+}
+
+function closeAddPatientForm() {
+  document.getElementById("addPatientForm").classList.add("hidden");
+}
+
+function clearAddPatientForm() {
+  [
+    "addDepartment",
+    "addPharmacist",
+    "addEmployeeId",
+    "addInpatientNo",
+    "addBedNo",
+    "addName",
+    "addAge",
+    "addSex",
+    "addWeight",
+    "addAdmissionDate",
+    "addDiagnosis",
+  ].forEach(id => {
+    document.getElementById(id).value = "";
+  });
+}
+
+async function submitAddPatient() {
+  const payload = {
+    department: document.getElementById("addDepartment").value.trim(),
+    pharmacist: document.getElementById("addPharmacist").value.trim(),
+    employee_id: document.getElementById("addEmployeeId").value.trim(),
+    inpatient_no: document.getElementById("addInpatientNo").value.trim(),
+    bed_no: document.getElementById("addBedNo").value.trim(),
+    name: document.getElementById("addName").value.trim(),
+    age: document.getElementById("addAge").value.trim(),
+    sex: document.getElementById("addSex").value.trim(),
+    weight: document.getElementById("addWeight").value.trim(),
+    admission_date: document.getElementById("addAdmissionDate").value.trim(),
+    diagnosis: document.getElementById("addDiagnosis").value.trim(),
+  };
+
+  if (!payload.inpatient_no && !payload.name) {
+    toast("住院号和姓名至少填写一个", true);
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/patients", {
+      method: "POST",
+      headers: withCsrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (data.error) {
+      toast(data.error, true);
+      return;
+    }
+
+    pendingSelectRowIdx = data.patient && data.patient.row_idx ? data.patient.row_idx : null;
+    await loadPatients();
+    closeAddPatientForm();
+    clearAddPatientForm();
+    toast("患者已添加");
+  } catch (e) {
+    toast("添加患者失败: " + e.message, true);
+  }
 }
 
 function renderPatients() {
