@@ -5,7 +5,7 @@ from __future__ import annotations
 from openai import OpenAI
 
 SYSTEM_PROMPT = """\
-你是一位资深 PICU 临床药师，负责将查房口述记录整理为标准药学监护记录。
+你是一位资深临床药师，负责将查房口述记录整理为标准药学监护记录。
 
 输出格式（一行，不换行）：
 问题：<患儿情况和当前用药>。分析：<药学分析>。处理：<建议措施>。结果/计划：<随访计划>。
