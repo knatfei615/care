@@ -23,6 +23,13 @@ body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; backgrou
 .upload-area p { margin-bottom: 16px; color: #64748b; }
 .upload-area label { display: inline-block; background: #2563eb; color: #fff; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 15px; min-height: 44px; line-height: 20px; }
 .upload-area input[type="file"] { display: none; }
+.upload-grid { display: grid; gap: 12px; }
+.upload-card { background: #fff; border-radius: 12px; padding: 16px; border: 1px solid #e2e8f0; }
+.upload-card h3 { color: #1e40af; font-size: 15px; margin-bottom: 6px; }
+.upload-card p { color: #64748b; font-size: 13px; margin-bottom: 10px; }
+.btn-upload { display: inline-block; background: #2563eb; color: #fff; padding: 10px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; border: none; }
+.guide-steps { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: #eff6ff; color: #1e3a8a; font-size: 13px; line-height: 1.6; }
+.upload-hint { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: #fff7ed; color: #9a3412; font-size: 13px; }
 
 /* ── Cards / sections ── */
 .card { background: #fff; border-radius: 10px; padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
@@ -64,6 +71,8 @@ body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; backgrou
 .edit-banner { margin-bottom: 8px; border-radius: 8px; padding: 8px 10px; font-size: 13px; background: #fff7ed; color: #9a3412; border: 1px solid #fdba74; }
 .btn-muted { background: #475569; color: #fff; }
 .btn-muted:active { background: #334155; }
+.template-box { margin-bottom: 10px; padding: 10px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }
+.template-fields .field { margin-top: 6px; }
 
 /* ── Pill toggles ── */
 .pill-group { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
@@ -111,10 +120,29 @@ textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 
 
 <!-- Upload view -->
 <div id="viewUpload" class="container">
-  <div class="upload-area" id="dropZone">
-    <p>上传监护工作簿 (.xlsm) 到云端</p>
-    <label for="fileInput">选择文件</label>
-    <input type="file" id="fileInput" accept=".xlsm" onchange="uploadFile(this.files[0])">
+  <div class="upload-grid">
+    <div class="upload-card">
+      <h3>方式一：上传已有监护工作簿</h3>
+      <p>适合你已在本地有 `.xlsm` 监护表的情况。</p>
+      <label class="btn-upload" for="fileInput">上传 .xlsm</label>
+      <input type="file" id="fileInput" accept=".xlsm" onchange="uploadFile(this.files[0])">
+    </div>
+    <div class="upload-card">
+      <h3>方式二：从病例清单创建工作簿</h3>
+      <p>上传病例清单（`.xlsx`），系统自动生成可用的监护工作簿。</p>
+      <label class="btn-upload" for="caseListInput">上传病例清单</label>
+      <input type="file" id="caseListInput" accept=".xlsx" onchange="importCaseList(this.files[0])">
+      <div class="guide-steps">
+        首次使用建议：<br>
+        1) 上传/导入病例清单<br>
+        2) 选择患者并生成记录<br>
+        3) 保存到 Excel
+      </div>
+      <div id="uploadHint" class="upload-hint hidden"></div>
+    </div>
+  </div>
+  <div class="upload-area" id="dropZone" style="margin-top: 12px;">
+    <p>也可将 `.xlsm` 文件直接拖拽到此处上传</p>
   </div>
 </div>
 
@@ -172,6 +200,16 @@ textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 
   <!-- Raw input -->
   <div class="card">
     <h2>查房记录（可选）</h2>
+    <div class="template-box">
+      <div class="label">模板推荐与快捷复用</div>
+      <div class="row" style="margin-bottom: 8px;">
+        <select id="templateSelect" class="date-input" onchange="onTemplateChange()" style="flex:1;">
+          <option value="">请选择模板（可选）</option>
+        </select>
+        <button class="btn-outline" onclick="renderTemplateNote()">一键填充</button>
+      </div>
+      <div id="templateFields" class="template-fields"></div>
+    </div>
     <div class="label">可先输入查房口述后使用 AI 生成标准记录，也可直接在下方手动填写监护意见。</div>
     <textarea id="rawInput" placeholder="输入查房口述记录，如：万古霉素谷浓度15，偏高，建议减量…" rows="4"></textarea>
     <button class="btn btn-primary" id="btnGenerate" onclick="generateNote()">AI 生成标准记录（可选）</button>
@@ -199,6 +237,7 @@ let selectedPatient = null;
 let slotStatuses = [];
 let editingSlot = null;
 let pendingSelectRowIdx = null;
+let templatesData = [];
 const LEVELS = ["一级监护", "二级监护", "三级监护"];
 const TYPES = ["药学查房", "药物重整", "药学监护", "用药咨询", "用药教育"];
 
@@ -211,6 +250,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupDragDrop();
   checkWorkbook();
   loadUserInfo();
+  loadTemplates();
 });
 
 async function loadUserInfo() {
@@ -248,11 +288,40 @@ async function uploadFile(file) {
   try {
     const res = await fetch("/api/upload", { method: "POST", headers: withCsrfHeaders(), body: fd });
     const data = await res.json();
-    if (data.error) { toast(data.error, true); return; }
+    if (data.error) { toast(formatApiError(data), true); return; }
     toast("上传成功");
     showMain();
     loadPatients();
   } catch (e) { toast("上传失败: " + e.message, true); }
+}
+
+async function importCaseList(file) {
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith(".xlsx")) {
+    toast("仅支持 .xlsx 病例清单", true);
+    return;
+  }
+
+  const fd = new FormData();
+  fd.append("file", file);
+  toast("正在根据病例清单创建工作簿…");
+  try {
+    const res = await fetch("/api/import-caselist", {
+      method: "POST",
+      headers: withCsrfHeaders(),
+      body: fd,
+    });
+    const data = await res.json();
+    if (data.error) {
+      toast(formatApiError(data), true);
+      return;
+    }
+    toast(`创建成功，已导入 ${data.imported_count || 0} 位患者`);
+    showMain();
+    loadPatients();
+  } catch (e) {
+    toast("导入失败: " + e.message, true);
+  }
 }
 
 /* ── Check if workbook exists ── */
@@ -264,6 +333,9 @@ async function checkWorkbook() {
       patients = data.patients;
       showMain();
       renderPatients();
+      setUploadHint("");
+    } else if (data.error) {
+      setUploadHint(formatApiError(data));
     }
   } catch (_) {}
 }
@@ -280,6 +352,7 @@ function showUpload() {
   document.getElementById("btnDownload").classList.add("hidden");
   document.getElementById("btnReupload").classList.add("hidden");
   document.getElementById("fileInput").value = "";
+  document.getElementById("caseListInput").value = "";
 }
 
 function showMain() {
@@ -295,7 +368,7 @@ async function loadPatients() {
   try {
     const res = await fetch("/api/patients");
     const data = await res.json();
-    if (data.error) { toast(data.error, true); return; }
+    if (data.error) { toast(formatApiError(data), true); return; }
     patients = data.patients;
     if (pendingSelectRowIdx !== null) {
       selectedPatient = patients.find(p => p.row_idx === pendingSelectRowIdx) || null;
@@ -371,7 +444,7 @@ async function submitAddPatient() {
     });
     const data = await res.json();
     if (data.error) {
-      toast(data.error, true);
+      toast(formatApiError(data), true);
       return;
     }
 
@@ -443,7 +516,7 @@ async function loadSlotStatuses() {
     if (data.error) {
       slotStatuses = [];
       hintEl.textContent = "加载既往记录失败";
-      toast(data.error, true);
+      toast(formatApiError(data), true);
       return;
     }
     slotStatuses = data.slots || [];
@@ -492,7 +565,7 @@ async function editSlot(slotIndex) {
     const res = await fetch(`/api/slots/${selectedPatient.row_idx}/${slotIndex}`);
     const data = await res.json();
     if (data.error) {
-      toast(data.error, true);
+      toast(formatApiError(data), true);
       return;
     }
     const slot = data.slot || {};
@@ -636,11 +709,11 @@ async function generateNote() {
     });
     const data = await res.json();
     if (data.error && !data.note) {
-      toast(data.error, true);
+      toast(formatApiError(data), true);
     } else {
       document.getElementById("previewText").value = data.note;
       document.getElementById("cardPreview").classList.remove("hidden");
-      if (data.error) toast(data.error, true);
+      if (data.error) toast(formatApiError(data), true);
     }
   } catch (e) {
     toast("生成失败: " + e.message, true);
@@ -651,11 +724,24 @@ async function generateNote() {
 }
 
 /* ── Save ── */
-async function saveNote() {
+async function saveNote(forceOverwrite = false) {
   if (!selectedPatient) { toast("请先选择患者", true); return; }
 
   const noteText = document.getElementById("previewText").value.trim();
   if (!noteText) { toast("记录内容为空", true); return; }
+  if (noteText.length < 20) { toast("记录内容过短，建议补充后保存", true); return; }
+  const level = getActivePill("levelGroup");
+  const noteType = getActivePill("typeGroup");
+  const dateVal = document.getElementById("dateInput").value;
+  if (!level) { toast("请先选择监护级别", true); return; }
+  if (!noteType) { toast("请先选择监护类型", true); return; }
+  if (!dateVal) { toast("请先选择日期", true); return; }
+  const markers = ["问题：", "分析：", "处理：", "结果/计划："];
+  const hasFullStructure = markers.every(marker => noteText.includes(marker));
+  if (!hasFullStructure) {
+    const proceed = window.confirm("当前监护意见不完整（缺少四段结构），仍要保存吗？");
+    if (!proceed) return;
+  }
 
   const btn = document.getElementById("btnSave");
   const currentEditingSlot = editingSlot;
@@ -666,12 +752,15 @@ async function saveNote() {
     const payload = {
       row_idx: selectedPatient.row_idx,
       note_text: noteText,
-      level: getActivePill("levelGroup"),
-      note_type: getActivePill("typeGroup"),
-      date: document.getElementById("dateInput").value,
+      level,
+      note_type: noteType,
+      date: dateVal,
     };
     if (currentEditingSlot) {
       payload.overwrite_slot = currentEditingSlot;
+    }
+    if (forceOverwrite) {
+      payload.force_overwrite = true;
     }
 
     const res = await fetch("/api/save", {
@@ -680,8 +769,16 @@ async function saveNote() {
       body: JSON.stringify(payload),
     });
     const data = await res.json();
+    if (data.needs_confirm && !forceOverwrite) {
+      const msg = `${data.message || "目标槽位已有内容"}\n旧记录：${data.old_preview || ""}\n新记录：${data.new_preview || ""}\n\n确认覆盖吗？`;
+      const ok = window.confirm(msg);
+      if (ok) {
+        await saveNote(true);
+      }
+      return;
+    }
     if (data.error) {
-      toast(data.error, true);
+      toast(formatApiError(data), true);
     } else {
       toast(currentEditingSlot ? `已覆盖记录${data.slot_index}` : `已保存到记录${data.slot_index}`);
       document.getElementById("rawInput").value = "";
@@ -709,6 +806,104 @@ function toast(msg, isError) {
   el.className = "toast show" + (isError ? " error" : "");
   clearTimeout(el._timer);
   el._timer = setTimeout(() => el.className = "toast", 2500);
+}
+
+function formatApiError(data) {
+  if (!data) return "操作失败";
+  if (!data.error) return "操作失败";
+  if (data.recovery_hint) {
+    return `${data.error} 建议：${data.recovery_hint}`;
+  }
+  return data.error;
+}
+
+function setUploadHint(text) {
+  const el = document.getElementById("uploadHint");
+  if (!el) return;
+  if (!text) {
+    el.textContent = "";
+    el.classList.add("hidden");
+    return;
+  }
+  el.textContent = text;
+  el.classList.remove("hidden");
+}
+
+/* ── Templates ── */
+async function loadTemplates() {
+  try {
+    const res = await fetch("/api/templates");
+    const data = await res.json();
+    if (data.error) {
+      return;
+    }
+    templatesData = data.templates || [];
+    const select = document.getElementById("templateSelect");
+    select.innerHTML = `<option value="">请选择模板（可选）</option>` + templatesData
+      .map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`)
+      .join("");
+  } catch (_) {}
+}
+
+function onTemplateChange() {
+  const select = document.getElementById("templateSelect");
+  const fieldsWrap = document.getElementById("templateFields");
+  const id = select.value;
+  if (!id) {
+    fieldsWrap.innerHTML = "";
+    return;
+  }
+  const tpl = templatesData.find(t => t.id === id);
+  if (!tpl) {
+    fieldsWrap.innerHTML = "";
+    return;
+  }
+
+  fieldsWrap.innerHTML = (tpl.fields || []).map(field => `
+    <div class="field">
+      <span class="label">${escapeHtml(field.label)}</span>
+      <input id="tpl_${escapeHtml(field.key)}" type="text" value="${escapeHtml(field.default || "")}">
+    </div>
+  `).join("");
+}
+
+async function renderTemplateNote() {
+  const select = document.getElementById("templateSelect");
+  const id = select.value;
+  if (!id) {
+    toast("请先选择模板", true);
+    return;
+  }
+  const tpl = templatesData.find(t => t.id === id);
+  if (!tpl) {
+    toast("模板不存在，请刷新后重试", true);
+    return;
+  }
+  const values = {};
+  (tpl.fields || []).forEach(field => {
+    const input = document.getElementById(`tpl_${field.key}`);
+    values[field.key] = (input && input.value ? input.value : (field.default || "")).trim();
+  });
+
+  try {
+    const res = await fetch("/api/templates/render", {
+      method: "POST",
+      headers: withCsrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ template_id: id, values }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      toast(formatApiError(data), true);
+      return;
+    }
+    document.getElementById("previewText").value = data.note || "";
+    if (data.default_note_type) {
+      setPill("typeGroup", data.default_note_type);
+    }
+    toast("模板已填充到监护意见");
+  } catch (e) {
+    toast("模板填充失败: " + e.message, true);
+  }
 }
 
 function escapeHtml(text) {

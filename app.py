@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from flask import Flask, after_this_request, jsonify, render_template, request, send_file
 from flask_login import current_user, login_required
@@ -18,6 +19,7 @@ from config import (
     OPENAI_BASE_URL,
     OPENAI_MODEL,
     PORT,
+    RECORD_TEMPLATE_PATH,
     SECRET_KEY,
     SQLALCHEMY_DATABASE_URI,
 )
@@ -34,6 +36,8 @@ from excel_io import (
     redact_workbooks,
     save_note,
 )
+from generate_picu_note import load_templates, render_note
+from import_case_list import WorkbookPaths, run_import
 from llm import structure_note
 from models import db, init_db, login_manager
 
@@ -72,6 +76,18 @@ def _ensure_user_dir() -> Path:
     return d
 
 
+def _api_error(
+    message: str,
+    status: int = 400,
+    error_type: str = "business_error",
+    recovery_hint: str | None = None,
+):
+    payload: dict[str, str] = {"error": message, "error_type": error_type}
+    if recovery_hint:
+        payload["recovery_hint"] = recovery_hint
+    return jsonify(payload), status
+
+
 @app.route("/healthz")
 def healthz():
     return jsonify(ok=True)
@@ -98,10 +114,10 @@ def upload():
     user_dir = _ensure_user_dir()
     file = request.files.get("file")
     if not file or not file.filename:
-        return jsonify(error="未选择文件。"), 400
+        return _api_error("未选择文件。", error_type="upload_error", recovery_hint="请选择一个 .xlsm 监护工作簿后重试。")
     filename = secure_filename(file.filename)
     if not filename or not filename.lower().endswith(".xlsm"):
-        return jsonify(error="仅支持 .xlsm 文件。"), 400
+        return _api_error("仅支持 .xlsm 文件。", error_type="upload_error", recovery_hint="请上传医院监护工作簿（.xlsm）。")
 
     dest = user_dir / filename
     file.save(str(dest))
@@ -110,17 +126,89 @@ def upload():
     return jsonify(ok=True, filename=filename)
 
 
+@app.route("/api/import-caselist", methods=["POST"])
+@login_required
+def import_caselist():
+    user_dir = _ensure_user_dir()
+    case_file = request.files.get("file")
+    if not case_file or not case_file.filename:
+        return _api_error("未选择病例清单文件。", error_type="upload_error", recovery_hint="请上传 .xlsx 的病例清单。")
+
+    case_filename = secure_filename(case_file.filename)
+    if not case_filename.lower().endswith(".xlsx"):
+        return _api_error("仅支持 .xlsx 病例清单。", error_type="upload_error", recovery_hint="请确认文件扩展名为 .xlsx。")
+
+    existing_wb = find_workbook(user_dir)
+    template_wb = existing_wb
+    if template_wb is None:
+        if RECORD_TEMPLATE_PATH and RECORD_TEMPLATE_PATH.exists():
+            template_wb = RECORD_TEMPLATE_PATH
+        else:
+            return _api_error(
+                "未找到可用于导入的监护模板工作簿。",
+                status=500,
+                error_type="config_error",
+                recovery_hint="请先上传一个 .xlsm 监护工作簿，或在环境变量 RECORD_TEMPLATE_PATH 配置默认模板路径。",
+            )
+
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    tmp_case_path = user_dir / f"~caselist-{timestamp}.xlsx"
+    output_wb = user_dir / f"住院药学诊查记录-{timestamp}-已导入.xlsm"
+    case_file.save(str(tmp_case_path))
+
+    args = SimpleNamespace(
+        pharmacist=(request.form.get("pharmacist") or "").strip(),
+        employee_id=(request.form.get("employee_id") or "").strip(),
+        unit_mode=(request.form.get("unit_mode") or "both").strip(),
+    )
+    if args.unit_mode not in {"department", "ward", "both"}:
+        args.unit_mode = "both"
+
+    try:
+        imported_count, _ = run_import(
+            WorkbookPaths(
+                case_list=tmp_case_path,
+                record_book=template_wb,
+                output_book=output_wb,
+            ),
+            args,
+        )
+        backup_workbook_identifiers(output_wb)
+        redact_workbook_identifiers(output_wb)
+    except SystemExit:
+        return _api_error(
+            "病例清单导入失败。",
+            error_type="excel_error",
+            recovery_hint="请检查病例清单列名是否完整（住院号、病人姓名、床号、入院诊断等）。",
+        )
+    except Exception as exc:
+        return _api_error(
+            f"导入失败：{exc}",
+            error_type="excel_error",
+            recovery_hint="请确认病例清单格式正确并重试。",
+        )
+    finally:
+        tmp_case_path.unlink(missing_ok=True)
+
+    return jsonify(
+        ok=True,
+        filename=output_wb.name,
+        imported_count=imported_count,
+        source_template=template_wb.name,
+    )
+
+
 @app.route("/api/download")
 @login_required
 def download():
     user_dir = _ensure_user_dir()
     wb = find_workbook(user_dir)
     if not wb:
-        return jsonify(error="云端没有工作簿，请先上传。"), 404
+        return _api_error("云端没有工作簿，请先上传。", status=404, error_type="upload_error", recovery_hint="先上传 .xlsm 或从病例清单创建工作簿。")
     try:
         export_wb = prepare_download_workbook(wb)
     except ExcelError as exc:
-        return jsonify(error=str(exc)), 400
+        return _api_error(str(exc), error_type="excel_error", recovery_hint="请重新上传原始工作簿后再下载。")
 
     @after_this_request
     def cleanup_export(response):
@@ -141,11 +229,11 @@ def patients():
     user_dir = _ensure_user_dir()
     wb = find_workbook(user_dir)
     if not wb:
-        return jsonify(error="云端没有工作簿，请先上传。"), 404
+        return _api_error("云端没有工作簿，请先上传。", status=404, error_type="upload_error", recovery_hint="上传 .xlsm 工作簿，或使用“从病例清单创建工作簿”。")
     try:
         rows = list_patients(wb)
     except ExcelError as exc:
-        return jsonify(error=str(exc)), 400
+        return _api_error(str(exc), error_type="excel_error", recovery_hint="请检查工作簿格式是否符合监护模板。")
     return jsonify(patients=rows)
 
 
@@ -155,13 +243,13 @@ def add_patient_api():
     user_dir = _ensure_user_dir()
     wb = find_workbook(user_dir)
     if not wb:
-        return jsonify(error="云端没有工作簿，请先上传。"), 404
+        return _api_error("云端没有工作簿，请先上传。", status=404, error_type="upload_error", recovery_hint="请先上传工作簿再添加患者。")
 
     data = request.get_json(silent=True) or {}
     try:
         patient = add_patient(wb, data)
     except ExcelError as exc:
-        return jsonify(error=str(exc)), 400
+        return _api_error(str(exc), error_type="excel_error", recovery_hint="请检查住院号/姓名是否填写，且患者区是否未满。")
 
     return jsonify(ok=True, patient=patient)
 
@@ -172,17 +260,70 @@ def add_patient_api():
 @login_required
 def generate():
     if not OPENAI_API_KEY:
-        return jsonify(error="服务器未配置 OPENAI_API_KEY。"), 500
+        return _api_error("服务器未配置 OPENAI_API_KEY。", status=500, error_type="config_error", recovery_hint="请联系管理员配置 AI API Key。")
 
     data = request.get_json(silent=True) or {}
     raw_text = (data.get("raw_text") or "").strip()
     if not raw_text:
-        return jsonify(error="请输入查房记录。"), 400
+        return _api_error("请输入查房记录。", error_type="validation_error", recovery_hint="先填写查房口述，再点击 AI 生成。")
 
     patient_info = (data.get("patient_info") or "").strip()
 
     result = structure_note(OPENAI_API_KEY, OPENAI_MODEL, patient_info, raw_text, OPENAI_BASE_URL)
     return jsonify(result)
+
+
+@app.route("/api/templates")
+@login_required
+def templates():
+    try:
+        specs = load_templates()
+    except SystemExit:
+        return _api_error("模板文件加载失败。", status=500, error_type="config_error", recovery_hint="请检查 picu_note_templates.json 是否存在且格式正确。")
+
+    payload = [
+        {
+            "id": t.template_id,
+            "name": t.name,
+            "description": t.description,
+            "default_note_type": t.default_note_type,
+            "fields": [{"key": f.key, "label": f.label, "default": f.default} for f in t.fields],
+        }
+        for t in specs
+    ]
+    return jsonify(templates=payload)
+
+
+@app.route("/api/templates/render", methods=["POST"])
+@login_required
+def template_render():
+    data = request.get_json(silent=True) or {}
+    template_id = (data.get("template_id") or "").strip()
+    values = data.get("values") or {}
+    if not template_id:
+        return _api_error("缺少 template_id。", error_type="validation_error", recovery_hint="请先选择模板。")
+    if not isinstance(values, dict):
+        return _api_error("模板参数格式错误。", error_type="validation_error", recovery_hint="请刷新页面后重试。")
+
+    try:
+        specs = load_templates()
+    except SystemExit:
+        return _api_error("模板文件加载失败。", status=500, error_type="config_error", recovery_hint="请检查模板配置文件。")
+
+    target = next((t for t in specs if t.template_id == template_id), None)
+    if not target:
+        return _api_error("模板不存在。", status=404, error_type="validation_error", recovery_hint="请重新选择模板。")
+
+    field_values = {
+        f.key: str(values.get(f.key, "")).strip() or f.default
+        for f in target.fields
+    }
+    note = render_note(target, field_values, multiline=False)
+    return jsonify(
+        ok=True,
+        note=note,
+        default_note_type=target.default_note_type,
+    )
 
 
 # ── Save to Excel ──────────────────────────────────────────────────
@@ -202,19 +343,48 @@ def save():
     note_type = data.get("note_type", "")
     date_str = data.get("date", "")
     overwrite_slot = data.get("overwrite_slot")
+    force_overwrite = bool(data.get("force_overwrite"))
 
     if not row_idx or not note_text:
-        return jsonify(error="缺少必填项（row_idx, note_text）。"), 400
+        return _api_error("缺少必填项（row_idx, note_text）。", error_type="validation_error", recovery_hint="请先选择患者并填写监护意见。")
+    if not level:
+        return _api_error("缺少监护级别。", error_type="validation_error", recovery_hint="请先选择一级/二级/三级监护。")
+    if not note_type:
+        return _api_error("缺少监护类型。", error_type="validation_error", recovery_hint="请先选择药学查房/药学监护等类型。")
+    if not date_str:
+        return _api_error("缺少日期。", error_type="validation_error", recovery_hint="请先选择记录日期。")
+    if len(note_text) < 20:
+        return _api_error("监护意见过短。", error_type="validation_error", recovery_hint="建议补充完整的四段式内容后再保存。")
+
+    required_markers = ("问题：", "分析：", "处理：", "结果/计划：")
+    if not all(marker in note_text for marker in required_markers):
+        return _api_error("监护意见缺少四段结构。", error_type="validation_error", recovery_hint="建议包含“问题/分析/处理/结果/计划”四段后再保存。")
 
     try:
-        record_date = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else datetime.today().date()
+        record_date = datetime.strptime(date_str, "%Y-%m-%d").date()
     except ValueError:
-        return jsonify(error="日期格式错误，应为 YYYY-MM-DD。"), 400
+        return _api_error("日期格式错误，应为 YYYY-MM-DD。", error_type="validation_error", recovery_hint="请从日期选择器重新选择日期。")
+
+    if overwrite_slot:
+        try:
+            detail = get_slot_detail(wb, int(row_idx), int(overwrite_slot))
+        except ExcelError as exc:
+            return _api_error(str(exc), error_type="excel_error", recovery_hint="请刷新后重试，或重新选择患者。")
+        if detail.get("has_note") and not force_overwrite:
+            existing_note = (detail.get("note") or "").strip()
+            return jsonify(
+                ok=False,
+                needs_confirm=True,
+                overwrite_slot=int(overwrite_slot),
+                old_preview=existing_note[:80],
+                new_preview=note_text[:80],
+                message=f"记录{overwrite_slot}已有内容，确认覆盖吗？",
+            )
 
     try:
         result = save_note(wb, int(row_idx), record_date, level, note_type, note_text, overwrite_slot)
     except ExcelError as exc:
-        return jsonify(error=str(exc)), 400
+        return _api_error(str(exc), error_type="excel_error", recovery_hint="请检查记录槽位状态，必要时选择覆盖槽位。")
 
     return jsonify(ok=True, **result)
 
@@ -227,11 +397,11 @@ def slots(row_idx):
     user_dir = _ensure_user_dir()
     wb = find_workbook(user_dir)
     if not wb:
-        return jsonify(error="云端没有工作簿，请先上传。"), 404
+        return _api_error("云端没有工作簿，请先上传。", status=404, error_type="upload_error")
     try:
         status = get_slot_status(wb, row_idx)
     except ExcelError as exc:
-        return jsonify(error=str(exc)), 400
+        return _api_error(str(exc), error_type="excel_error")
     return jsonify(slots=status)
 
 
@@ -241,11 +411,11 @@ def slot_detail(row_idx, slot_index):
     user_dir = _ensure_user_dir()
     wb = find_workbook(user_dir)
     if not wb:
-        return jsonify(error="云端没有工作簿，请先上传。"), 404
+        return _api_error("云端没有工作簿，请先上传。", status=404, error_type="upload_error")
     try:
         detail = get_slot_detail(wb, row_idx, slot_index)
     except ExcelError as exc:
-        return jsonify(error=str(exc)), 400
+        return _api_error(str(exc), error_type="excel_error")
     return jsonify(slot=detail)
 
 

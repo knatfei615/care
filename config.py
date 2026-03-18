@@ -17,6 +17,7 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "anthropic/claude-sonnet-4-6")
 DATA_DIR = Path(os.environ.get("DATA_DIR", "./data"))
+RECORD_TEMPLATE_PATH = Path(os.environ.get("RECORD_TEMPLATE_PATH", "")).expanduser() if os.environ.get("RECORD_TEMPLATE_PATH") else None
 PORT = int(os.environ.get("PORT", "5000"))
 FLASK_DEBUG = _env_bool("FLASK_DEBUG", default=False)
 MAX_UPLOAD_MB = 10
