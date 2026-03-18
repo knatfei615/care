@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from io import BytesIO
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import openpyxl
 from flask import Flask, after_this_request, jsonify, render_template, request, send_file
 from flask_login import current_user, login_required
 from flask_wtf.csrf import CSRFProtect, generate_csrf
@@ -124,6 +126,75 @@ def upload():
     backup_workbook_identifiers(dest)
     redact_workbook_identifiers(dest)
     return jsonify(ok=True, filename=filename)
+
+
+@app.route("/api/template/case-list")
+@login_required
+def download_case_list_template():
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "病例清单模板"
+
+    headers = [
+        "住院号",
+        "病人姓名",
+        "年龄",
+        "性别",
+        "体重(kg)",
+        "当前科室",
+        "病区",
+        "床号",
+        "入院日期",
+        "入院诊断",
+    ]
+    sample_row = [
+        "123456",
+        "张三",
+        "2岁",
+        "男",
+        "12.5",
+        "儿科",
+        "PICU",
+        "01",
+        "2026-03-18",
+        "重症肺炎",
+    ]
+    notes_row = [
+        "示例住院号",
+        "示例姓名",
+        "可填岁/月",
+        "男/女",
+        "请填数字",
+        "如：儿科",
+        "如：PICU",
+        "床位号",
+        "建议 YYYY-MM-DD",
+        "主要诊断",
+    ]
+
+    sheet.append(headers)
+    sheet.append(sample_row)
+    sheet.append(notes_row)
+    sheet.freeze_panes = "A2"
+
+    for col_idx, title in enumerate(headers, start=1):
+        cell = sheet.cell(row=1, column=col_idx)
+        cell.font = openpyxl.styles.Font(bold=True)
+        if title in {"入院诊断", "当前科室", "病区"}:
+            sheet.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = 22
+        else:
+            sheet.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = 14
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+    workbook.close()
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name="病例清单模板.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 @app.route("/api/import-caselist", methods=["POST"])

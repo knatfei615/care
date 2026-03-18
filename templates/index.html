@@ -130,7 +130,10 @@ textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 
     <div class="upload-card">
       <h3>方式二：从病例清单创建工作簿</h3>
       <p>上传病例清单（`.xlsx`），系统自动生成可用的监护工作簿。</p>
-      <label class="btn-upload" for="caseListInput">上传病例清单</label>
+      <div class="row" style="margin-bottom: 8px;">
+        <label class="btn-upload" for="caseListInput">上传病例清单</label>
+        <button class="btn-upload" type="button" onclick="downloadCaseListTemplate()">下载模板</button>
+      </div>
       <input type="file" id="caseListInput" accept=".xlsx" onchange="importCaseList(this.files[0])">
       <div class="guide-steps">
         首次使用建议：<br>
@@ -343,6 +346,10 @@ async function checkWorkbook() {
 /* ── Download ── */
 function downloadFile() {
   window.location.href = "/api/download";
+}
+
+function downloadCaseListTemplate() {
+  window.location.href = "/api/template/case-list";
 }
 
 /* ── View switching ── */
