@@ -39,7 +39,6 @@ ANON_ID_PREFIX = "ANON-"
 TEMP_EXPORT_PREFIX = "~export-"
 ANON_NAME_PREFIX = "匿名患者"
 
-
 class ExcelError(Exception):
     """Raised when an Excel operation fails."""
 
@@ -127,7 +126,6 @@ def prepare_download_workbook(wb_path: Path) -> Path:
 
         book.save(export_path)
         book.close()
-
     return export_path
 
 
@@ -397,7 +395,6 @@ def save_note(
         )
         book.save(wb_path)
         book.close()
-
     return {
         "row_idx": row_idx,
         "name": patient.name,

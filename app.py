@@ -12,6 +12,7 @@ from werkzeug.utils import secure_filename
 
 from config import (
     DATA_DIR,
+    FLASK_DEBUG,
     MAX_UPLOAD_MB,
     OPENAI_API_KEY,
     OPENAI_BASE_URL,
@@ -19,8 +20,6 @@ from config import (
     PORT,
     SECRET_KEY,
     SQLALCHEMY_DATABASE_URI,
-    ADMIN_USERNAME,
-    ADMIN_PASSWORD,
 )
 from excel_io import (
     add_patient,
@@ -76,6 +75,11 @@ def _ensure_user_dir() -> Path:
 @app.route("/healthz")
 def healthz():
     return jsonify(ok=True)
+
+
+@app.route("/favicon.ico")
+def favicon():
+    return "", 204
 
 
 # ── Pages ───────────────────────────────────────────────────────────
@@ -263,4 +267,4 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 init_db(app)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT, debug=True)
+    app.run(host="0.0.0.0", port=PORT, debug=FLASK_DEBUG)

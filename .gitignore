@@ -7,3 +7,5 @@ data/
 *.xlsx
 *.xlsm
 *.csv
+.cursor/
+debug-d320ec.log
