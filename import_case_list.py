@@ -216,6 +216,14 @@ def clear_base_columns(record_sheet: openpyxl.worksheet.worksheet.Worksheet) -> 
             record_sheet[f"{column}{row_idx}"] = None
 
 
+def clear_note_columns(record_sheet: openpyxl.worksheet.worksheet.Worksheet) -> None:
+    """Clear all 6 note slots (columns L–AI, i.e. cols 12–35) so that stale
+    monitoring records from a reused workbook don't leak into the new import."""
+    for row_idx in range(START_ROW, START_ROW + MAX_IMPORT_ROWS):
+        for col_idx in range(12, 36):
+            record_sheet.cell(row=row_idx, column=col_idx).value = None
+
+
 def write_rows(
     record_sheet: openpyxl.worksheet.worksheet.Worksheet,
     imported_rows: list[dict[str, Any]],
@@ -240,6 +248,7 @@ def run_import(paths: WorkbookPaths, args: argparse.Namespace) -> tuple[int, str
         unit_mode=args.unit_mode,
     )
     clear_base_columns(record_sheet)
+    clear_note_columns(record_sheet)
     write_rows(record_sheet, imported_rows)
 
     record_book.save(paths.output_book)
