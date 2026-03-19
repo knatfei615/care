@@ -11,6 +11,7 @@ import shutil
 import threading
 from datetime import date, datetime
 from pathlib import Path
+import re
 from typing import Any
 from uuid import uuid4
 
@@ -38,6 +39,18 @@ BASE_COLUMNS = ("A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K")
 ANON_ID_PREFIX = "ANON-"
 TEMP_EXPORT_PREFIX = "~export-"
 ANON_NAME_PREFIX = "匿名患者"
+STATUS_TODAY_UPDATED = "today_updated"
+STATUS_PENDING = "pending"
+STATUS_STALE_48H = "stale_48h"
+STATUS_NO_RECORD = "no_record"
+
+DIAGNOSIS_TAG_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("抗菌药物", ("感染", "抗感染", "抗菌", "肺炎", "败血症", "sepsis", "abx", "antibiotic")),
+    ("TDM", ("tdm", "血药浓度", "万古霉素", "他克莫司", "丙戊酸", "地高辛")),
+    ("CRRT", ("crrt", "透析", "血液净化", "连续肾脏替代", "ecmo")),
+    ("肾功能异常", ("肾功能", "肾损伤", "少尿", "无尿", "肌酐", "bun", "aki", "ckd")),
+    ("ADR", ("不良反应", "过敏", "皮疹", "肝损伤", "adr", "药物不良", "药疹")),
+)
 
 class ExcelError(Exception):
     """Raised when an Excel operation fails."""
@@ -53,6 +66,135 @@ def _catch(fn, *args, **kwargs):
 
 def _identifier_backup_path(wb_path: Path) -> Path:
     return wb_path.with_name(f"{wb_path.stem}.identifiers.json")
+
+
+def _parse_excel_date(value: Any) -> datetime | None:
+    """Parse excel/date-like values into datetime."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time())
+
+    text = format_cell(value).strip()
+    if not text:
+        return None
+
+    text = text.replace("年", "-").replace("月", "-").replace("日", "")
+    text = text.replace("/", "-").strip()
+    for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _extract_tags_from_diagnosis(diagnosis: str) -> list[str]:
+    normalized = (diagnosis or "").lower()
+    tags: list[str] = []
+    for tag, keywords in DIAGNOSIS_TAG_RULES:
+        if any(keyword.lower() in normalized for keyword in keywords):
+            tags.append(tag)
+    return tags
+
+
+def _extract_major_issue(note_text: str) -> str:
+    if not note_text:
+        return ""
+
+    match = re.search(r"问题：\s*(.*?)\s*(?:分析：|$)", note_text, flags=re.S)
+    if not match:
+        return ""
+
+    issue = re.sub(r"\s+", " ", match.group(1)).strip("；;。 ")
+    return issue[:100]
+
+
+def _collect_slot_records(sheet, row_idx: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Collect raw slot status list and effective note records."""
+    slots: list[dict[str, Any]] = []
+    records: list[dict[str, Any]] = []
+
+    for slot in NOTE_SLOTS:
+        note_val = format_cell(sheet[f"{slot['note']}{row_idx}"].value)
+        date_raw = sheet[f"{slot['date']}{row_idx}"].value
+        date_val = format_cell(date_raw)
+        level_val = format_cell(sheet[f"{slot['level']}{row_idx}"].value)
+        type_val = format_cell(sheet[f"{slot['type']}{row_idx}"].value)
+        parsed_date = _parse_excel_date(date_raw or date_val)
+
+        slots.append({
+            "index": slot["index"],
+            "has_note": bool(note_val),
+            "date": date_val,
+            "preview": note_val[:60] if note_val else "",
+            "level": level_val,
+            "note_type": type_val,
+        })
+
+        if note_val:
+            records.append({
+                "slot_index": slot["index"],
+                "date": date_val,
+                "parsed_date": parsed_date,
+                "level": level_val,
+                "note_type": type_val,
+                "note": note_val,
+            })
+
+    records.sort(
+        key=lambda item: (
+            item["parsed_date"] or datetime.min,
+            item["slot_index"],
+        ),
+        reverse=True,
+    )
+    return slots, records
+
+
+def _compute_status(last_note_dt: datetime | None) -> str:
+    if last_note_dt is None:
+        return STATUS_NO_RECORD
+
+    now = datetime.now()
+    if last_note_dt.date() == now.date():
+        return STATUS_TODAY_UPDATED
+
+    elapsed = now - last_note_dt
+    if elapsed.total_seconds() > 48 * 3600:
+        return STATUS_STALE_48H
+    return STATUS_PENDING
+
+
+def _build_tracking_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
+    latest = records[0] if records else None
+    latest_dt = latest["parsed_date"] if latest else None
+    latest_date = ""
+    if latest:
+        latest_date = latest["date"] or (latest_dt.strftime("%Y-%m-%d") if latest_dt else "")
+
+    recent_records = []
+    for item in records[:3]:
+        preview = re.sub(r"\s+", " ", item["note"]).strip()[:50]
+        recent_records.append({
+            "slot_index": item["slot_index"],
+            "date": item["date"] or (item["parsed_date"].strftime("%Y-%m-%d") if item["parsed_date"] else ""),
+            "level": item["level"],
+            "note_type": item["note_type"],
+            "preview": preview,
+        })
+
+    return {
+        "latest_note_date": latest_date,
+        "major_issue": _extract_major_issue(latest["note"]) if latest else "",
+        "recent_records": recent_records,
+    }
 
 
 def backup_workbook_identifiers(wb_path: Path) -> Path:
@@ -207,6 +349,13 @@ def list_patients(wb_path: Path) -> list[dict]:
         result = []
         for p in patients:
             prev_level, prev_type = find_previous_defaults(sheet, p)
+            _, records = _collect_slot_records(sheet, p.row_idx)
+            latest = records[0] if records else None
+            latest_dt = latest["parsed_date"] if latest else None
+            last_note_date = ""
+            if latest:
+                last_note_date = latest["date"] or (latest_dt.strftime("%Y-%m-%d") if latest_dt else "")
+            status = _compute_status(latest_dt)
             result.append({
                 "row_idx": p.row_idx,
                 "inpatient_no": p.inpatient_no,
@@ -219,6 +368,9 @@ def list_patients(wb_path: Path) -> list[dict]:
                 "diagnosis": p.diagnosis,
                 "prev_level": prev_level,
                 "prev_type": prev_type,
+                "last_note_date": last_note_date,
+                "status": status,
+                "tags": _extract_tags_from_diagnosis(p.diagnosis),
             })
         book.close()
     return result
@@ -324,18 +476,22 @@ def get_slot_status(wb_path: Path, row_idx: int) -> list[dict]:
         book = openpyxl.load_workbook(wb_path, keep_vba=True, data_only=True)
         sheet = book[book.sheetnames[0]]
         _load_patient_row(sheet, row_idx)
-        result = []
-        for slot in NOTE_SLOTS:
-            note_val = format_cell(sheet[f"{slot['note']}{row_idx}"].value)
-            date_val = format_cell(sheet[f"{slot['date']}{row_idx}"].value)
-            result.append({
-                "index": slot["index"],
-                "has_note": bool(note_val),
-                "date": date_val,
-                "preview": note_val[:60] if note_val else "",
-            })
+        result, _ = _collect_slot_records(sheet, row_idx)
         book.close()
     return result
+
+
+def get_slot_status_with_summary(wb_path: Path, row_idx: int) -> dict[str, Any]:
+    """Return slot status with patient tracking summary for a row."""
+    with _lock:
+        book = openpyxl.load_workbook(wb_path, keep_vba=True, data_only=True)
+        sheet = book[book.sheetnames[0]]
+        _load_patient_row(sheet, row_idx)
+        slots, records = _collect_slot_records(sheet, row_idx)
+        summary = _build_tracking_summary(records)
+        summary["status"] = _compute_status(records[0]["parsed_date"] if records else None)
+        book.close()
+    return {"slots": slots, "summary": summary}
 
 
 def get_slot_detail(wb_path: Path, row_idx: int, slot_index: int) -> dict:

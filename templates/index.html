@@ -45,6 +45,8 @@ body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; backgrou
 
 /* ── Search ── */
 .search-input { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 16px; margin-bottom: 10px; }
+.filter-row { display: flex; gap: 8px; margin-bottom: 10px; }
+.filter-row select { flex: 1; padding: 9px 10px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; font-size: 14px; }
 
 /* ── Patient list ── */
 .patient-list { max-height: 260px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
@@ -57,6 +59,14 @@ body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; backgrou
 .patient-item .id { color: #64748b; font-size: 13px; }
 .patient-item .diag { color: #94a3b8; font-size: 13px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .patient-meta { margin-top: 4px; color: #64748b; font-size: 12px; line-height: 1.4; }
+.patient-topline { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 3px; }
+.status-pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+.status-today_updated { background: #dcfce7; color: #166534; }
+.status-pending { background: #fef3c7; color: #92400e; }
+.status-stale_48h { background: #fee2e2; color: #991b1b; }
+.status-no_record { background: #e2e8f0; color: #334155; }
+.tag-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
+.tag-badge { border: 1px solid #bfdbfe; background: #eff6ff; color: #1d4ed8; border-radius: 999px; padding: 2px 8px; font-size: 11px; }
 .patient-summary { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: #eff6ff; color: #1e3a8a; font-size: 13px; line-height: 1.5; }
 .history-list { display: flex; flex-direction: column; gap: 8px; }
 .history-item { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; background: #fff; }
@@ -73,6 +83,14 @@ body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; backgrou
 .btn-muted:active { background: #334155; }
 .template-box { margin-bottom: 10px; padding: 10px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }
 .template-fields .field { margin-top: 6px; }
+.summary-card { border: 1px solid #dbeafe; background: #f8fbff; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+.summary-row { display: flex; flex-wrap: wrap; gap: 8px 14px; color: #1e3a8a; font-size: 13px; margin-bottom: 10px; }
+.summary-issue { border-radius: 8px; background: #fff; border: 1px solid #e2e8f0; color: #334155; padding: 9px 10px; font-size: 13px; margin-bottom: 10px; }
+.timeline-row { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+.timeline-item { min-width: 150px; border: 1px solid #dbeafe; border-radius: 8px; background: #fff; padding: 8px; }
+.timeline-date { color: #2563eb; font-size: 12px; margin-bottom: 3px; }
+.timeline-preview { color: #334155; font-size: 12px; line-height: 1.45; }
+.timeline-empty { color: #94a3b8; font-size: 13px; }
 
 /* ── Pill toggles ── */
 .pill-group { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
@@ -179,6 +197,20 @@ textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 
       </div>
     </div>
     <input class="search-input" id="searchInput" type="text" placeholder="搜索床号、诊断或匿名编号…" oninput="filterPatients()">
+    <div class="filter-row">
+      <select id="statusFilter" onchange="filterPatients()">
+        <option value="">全部状态</option>
+        <option value="no_record">未处理</option>
+        <option value="pending">待处理</option>
+        <option value="stale_48h">超48小时</option>
+        <option value="today_updated">今日已更新</option>
+      </select>
+      <select id="sortMode" onchange="filterPatients()">
+        <option value="priority">按优先级排序</option>
+        <option value="last_note_desc">按最近记录时间</option>
+        <option value="bed">按床号</option>
+      </select>
+    </div>
     <div class="patient-list" id="patientList"></div>
     <div class="patient-summary hidden" id="patientSummary"></div>
   </div>
@@ -188,6 +220,12 @@ textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 
     <h2>既往监护记录</h2>
     <div class="label" id="historyHint">请选择患者后查看记录</div>
     <div class="history-list" id="historyList"></div>
+  </div>
+
+  <div class="summary-card hidden" id="patientTrackingCard">
+    <div class="summary-row" id="summaryRow"></div>
+    <div class="summary-issue" id="summaryIssue"></div>
+    <div class="timeline-row" id="summaryTimeline"></div>
   </div>
 
   <!-- Level & Type -->
@@ -238,6 +276,7 @@ const csrfToken = "{{ csrf_token() }}";
 let patients = [];
 let selectedPatient = null;
 let slotStatuses = [];
+let patientTrackingSummary = null;
 let editingSlot = null;
 let pendingSelectRowIdx = null;
 let templatesData = [];
@@ -391,8 +430,10 @@ async function loadPatients() {
       loadSlotStatuses();
     } else {
       slotStatuses = [];
+      patientTrackingSummary = null;
       document.getElementById("historyHint").textContent = "请选择患者后查看记录";
       document.getElementById("historyList").innerHTML = "";
+      renderPatientTrackingCard();
     }
   } catch (e) { toast("加载患者列表失败", true); }
 }
@@ -467,6 +508,8 @@ async function submitAddPatient() {
 
 function renderPatients() {
   const q = document.getElementById("searchInput").value.trim().toLowerCase();
+  const statusFilter = document.getElementById("statusFilter").value;
+  const sortMode = document.getElementById("sortMode").value;
   const list = document.getElementById("patientList");
   const filtered = patients.filter(p =>
     !q || p.name.toLowerCase().includes(q) ||
@@ -477,10 +520,24 @@ function renderPatients() {
     (p.sex || "").toLowerCase().includes(q) ||
     (p.weight || "").toLowerCase().includes(q) ||
     (p.admission_date || "").toLowerCase().includes(q)
-  );
-  list.innerHTML = filtered.map(p =>
+  ).filter(p => !statusFilter || p.status === statusFilter);
+
+  const sorted = [...filtered];
+  if (sortMode === "priority") {
+    sorted.sort((a, b) => priorityRank(a.status) - priorityRank(b.status));
+  } else if (sortMode === "last_note_desc") {
+    sorted.sort((a, b) => compareDateText(b.last_note_date, a.last_note_date));
+  } else if (sortMode === "bed") {
+    sorted.sort((a, b) => (a.bed_no || "").localeCompare(b.bed_no || "", "zh-Hans-CN", { numeric: true }));
+  }
+
+  list.innerHTML = sorted.map(p =>
     `<div class="patient-item ${selectedPatient && selectedPatient.row_idx === p.row_idx ? 'selected' : ''}"
           onclick="selectPatient(${p.row_idx})">
+      <div class="patient-topline">
+        <span class="status-pill status-${p.status}">${formatStatusLabel(p.status)}</span>
+        <span class="id">${p.last_note_date ? `最近记录 ${escapeHtml(p.last_note_date)}` : "无记录"}</span>
+      </div>
       <div class="patient-main">
         <span class="bed">${p.bed_no || '-'}</span>
         <span class="name">${p.name}</span>
@@ -488,6 +545,7 @@ function renderPatients() {
         <span class="diag">${p.diagnosis}</span>
       </div>
       <div class="patient-meta">${formatPatientMeta(p)}</div>
+      ${renderTagBadges(p.tags || [])}
     </div>`
   ).join("");
 }
@@ -496,9 +554,11 @@ function filterPatients() { renderPatients(); }
 
 function selectPatient(rowIdx) {
   selectedPatient = patients.find(p => p.row_idx === rowIdx);
+  patientTrackingSummary = null;
   clearEditingState();
   renderPatients();
   updatePatientSummary();
+  renderPatientTrackingCard();
   loadSlotStatuses();
   // Apply previous defaults
   if (selectedPatient.prev_level) setPill("levelGroup", selectedPatient.prev_level);
@@ -510,8 +570,10 @@ async function loadSlotStatuses() {
   const listEl = document.getElementById("historyList");
   if (!selectedPatient) {
     slotStatuses = [];
+    patientTrackingSummary = null;
     hintEl.textContent = "请选择患者后查看记录";
     listEl.innerHTML = "";
+    renderPatientTrackingCard();
     return;
   }
 
@@ -522,17 +584,23 @@ async function loadSlotStatuses() {
     const data = await res.json();
     if (data.error) {
       slotStatuses = [];
+      patientTrackingSummary = null;
       hintEl.textContent = "加载既往记录失败";
       toast(formatApiError(data), true);
+      renderPatientTrackingCard();
       return;
     }
     slotStatuses = data.slots || [];
+    patientTrackingSummary = data.summary || null;
     hintEl.textContent = "点击“编辑”可回填并修改既往记录";
     renderSlotStatuses();
+    renderPatientTrackingCard();
   } catch (_) {
     slotStatuses = [];
+    patientTrackingSummary = null;
     hintEl.textContent = "加载既往记录失败";
     toast("加载既往记录失败", true);
+    renderPatientTrackingCard();
   }
 }
 
@@ -653,6 +721,45 @@ function updatePatientSummary() {
   el.classList.remove("hidden");
 }
 
+function renderPatientTrackingCard() {
+  const card = document.getElementById("patientTrackingCard");
+  const row = document.getElementById("summaryRow");
+  const issue = document.getElementById("summaryIssue");
+  const timeline = document.getElementById("summaryTimeline");
+  if (!selectedPatient) {
+    card.classList.add("hidden");
+    row.innerHTML = "";
+    issue.textContent = "";
+    timeline.innerHTML = "";
+    return;
+  }
+
+  const summary = patientTrackingSummary || {};
+  const latest = summary.latest_note_date || "无";
+  const statusLabel = formatStatusLabel(summary.status || selectedPatient.status);
+  row.innerHTML = `
+    <span>最近记录：${escapeHtml(latest)}</span>
+    <span>当前状态：${escapeHtml(statusLabel)}</span>
+  `;
+
+  issue.textContent = summary.major_issue
+    ? `主要问题：${summary.major_issue}`
+    : "主要问题：暂无结构化提取结果";
+
+  const records = summary.recent_records || [];
+  if (!records.length) {
+    timeline.innerHTML = `<div class="timeline-empty">暂无近三次记录</div>`;
+  } else {
+    timeline.innerHTML = records.map(item => `
+      <div class="timeline-item">
+        <div class="timeline-date">${escapeHtml(item.date || "无日期")}</div>
+        <div class="timeline-preview">${escapeHtml(item.preview || "无摘要")}</div>
+      </div>
+    `).join("");
+  }
+  card.classList.remove("hidden");
+}
+
 function buildPatientInfoText(patient) {
   if (!patient) return "";
 
@@ -668,6 +775,42 @@ function buildPatientInfoText(patient) {
   ].filter(Boolean);
 
   return parts.join("，");
+}
+
+function formatStatusLabel(status) {
+  if (status === "today_updated") return "今日已更新";
+  if (status === "pending") return "待处理";
+  if (status === "stale_48h") return "超48小时";
+  if (status === "no_record") return "未处理";
+  return "未知";
+}
+
+function priorityRank(status) {
+  if (status === "no_record" || status === "pending") return 0;
+  if (status === "stale_48h") return 1;
+  if (status === "today_updated") return 2;
+  return 3;
+}
+
+function compareDateText(a, b) {
+  const da = parseDateText(a);
+  const db = parseDateText(b);
+  if (!da && !db) return 0;
+  if (!da) return -1;
+  if (!db) return 1;
+  return da - db;
+}
+
+function parseDateText(text) {
+  if (!text) return null;
+  const normalized = String(text).replaceAll("年", "-").replaceAll("月", "-").replaceAll("日", "").replaceAll("/", "-").trim();
+  const dt = new Date(normalized);
+  return Number.isNaN(dt.getTime()) ? null : dt.getTime();
+}
+
+function renderTagBadges(tags) {
+  if (!tags.length) return "";
+  return `<div class="tag-list">${tags.map(tag => `<span class="tag-badge">${escapeHtml(tag)}</span>`).join("")}</div>`;
 }
 
 /* ── Pills ── */

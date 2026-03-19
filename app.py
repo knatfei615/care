@@ -31,7 +31,7 @@ from excel_io import (
     backup_workbook_identifiers,
     find_workbook,
     get_slot_detail,
-    get_slot_status,
+    get_slot_status_with_summary,
     list_patients,
     prepare_download_workbook,
     redact_workbook_identifiers,
@@ -470,10 +470,10 @@ def slots(row_idx):
     if not wb:
         return _api_error("云端没有工作簿，请先上传。", status=404, error_type="upload_error")
     try:
-        status = get_slot_status(wb, row_idx)
+        payload = get_slot_status_with_summary(wb, row_idx)
     except ExcelError as exc:
         return _api_error(str(exc), error_type="excel_error")
-    return jsonify(slots=status)
+    return jsonify(slots=payload["slots"], summary=payload["summary"])
 
 
 @app.route("/api/slots/<int:row_idx>/<int:slot_index>")
