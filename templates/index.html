@@ -874,7 +874,7 @@ async function generateNote() {
 }
 
 /* ── Save ── */
-async function saveNote(forceOverwrite = false) {
+async function saveNote(forceOverwrite = false, skipStructureCheck = false) {
   if (!selectedPatient) { toast("请先选择患者", true); return; }
 
   const noteText = document.getElementById("previewText").value.trim();
@@ -886,11 +886,14 @@ async function saveNote(forceOverwrite = false) {
   if (!level) { toast("请先选择监护级别", true); return; }
   if (!noteType) { toast("请先选择监护类型", true); return; }
   if (!dateVal) { toast("请先选择日期", true); return; }
-  const markers = ["问题：", "分析：", "处理：", "结果/计划："];
-  const hasFullStructure = markers.every(marker => noteText.includes(marker));
-  if (!hasFullStructure) {
-    const proceed = window.confirm("当前监护意见不完整（缺少四段结构），仍要保存吗？");
-    if (!proceed) return;
+  if (!skipStructureCheck) {
+    const markers = ["问题：", "分析：", "处理：", "结果/计划："];
+    const hasFullStructure = markers.every(marker => noteText.includes(marker));
+    if (!hasFullStructure) {
+      const proceed = window.confirm("当前监护意见不完整（缺少四段结构），仍要保存吗？");
+      if (!proceed) return;
+      skipStructureCheck = true;
+    }
   }
 
   const btn = document.getElementById("btnSave");
@@ -912,6 +915,9 @@ async function saveNote(forceOverwrite = false) {
     if (forceOverwrite) {
       payload.force_overwrite = true;
     }
+    if (skipStructureCheck) {
+      payload.skip_structure_check = true;
+    }
 
     const res = await fetch("/api/save", {
       method: "POST",
@@ -923,7 +929,7 @@ async function saveNote(forceOverwrite = false) {
       const msg = `${data.message || "目标槽位已有内容"}\n旧记录：${data.old_preview || ""}\n新记录：${data.new_preview || ""}\n\n确认覆盖吗？`;
       const ok = window.confirm(msg);
       if (ok) {
-        await saveNote(true);
+        await saveNote(true, skipStructureCheck);
       }
       return;
     }

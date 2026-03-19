@@ -9,3 +9,5 @@ data/
 *.csv
 .cursor/
 debug-d320ec.log
+test_e2e_final.py
+test_screenshots/

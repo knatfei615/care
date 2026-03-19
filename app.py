@@ -147,39 +147,28 @@ def download_case_list_template():
         "入院日期",
         "入院诊断",
     ]
-    sample_row = [
-        "123456",
-        "张三",
-        "2岁",
-        "男",
-        "12.5",
-        "儿科",
-        "PICU",
-        "01",
-        "2026-03-18",
-        "重症肺炎",
-    ]
-    notes_row = [
-        "示例住院号",
-        "示例姓名",
-        "可填岁/月",
-        "男/女",
-        "请填数字",
-        "如：儿科",
-        "如：PICU",
-        "床位号",
-        "建议 YYYY-MM-DD",
-        "主要诊断",
-    ]
+    header_hints = {
+        "住院号": "必填，如 123456",
+        "病人姓名": "必填，如 张三",
+        "年龄": "可填岁/月，如 2岁、6月",
+        "性别": "男 或 女",
+        "体重(kg)": "请填数字，如 12.5",
+        "当前科室": "如：儿科",
+        "病区": "如：PICU",
+        "床号": "床位号，如 01",
+        "入院日期": "建议 YYYY-MM-DD 格式",
+        "入院诊断": "主要诊断",
+    }
 
     sheet.append(headers)
-    sheet.append(sample_row)
-    sheet.append(notes_row)
     sheet.freeze_panes = "A2"
 
     for col_idx, title in enumerate(headers, start=1):
         cell = sheet.cell(row=1, column=col_idx)
         cell.font = openpyxl.styles.Font(bold=True)
+        hint = header_hints.get(title)
+        if hint:
+            cell.comment = openpyxl.comments.Comment(hint, "系统模板")
         if title in {"入院诊断", "当前科室", "病区"}:
             sheet.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = 22
         else:
@@ -427,9 +416,11 @@ def save():
     if len(note_text) < 20:
         return _api_error("监护意见过短。", error_type="validation_error", recovery_hint="建议补充完整的四段式内容后再保存。")
 
-    required_markers = ("问题：", "分析：", "处理：", "结果/计划：")
-    if not all(marker in note_text for marker in required_markers):
-        return _api_error("监护意见缺少四段结构。", error_type="validation_error", recovery_hint="建议包含“问题/分析/处理/结果/计划”四段后再保存。")
+    skip_structure_check = bool(data.get("skip_structure_check"))
+    if not skip_structure_check:
+        required_markers = ("问题：", "分析：", "处理：", "结果/计划：")
+        if not all(marker in note_text for marker in required_markers):
+            return _api_error("监护意见缺少四段结构。", error_type="validation_error", recovery_hint="建议包含“问题/分析/处理/结果/计划”四段后再保存。")
 
     try:
         record_date = datetime.strptime(date_str, "%Y-%m-%d").date()
