@@ -378,7 +378,14 @@ def template_render():
         f.key: str(values.get(f.key, "")).strip() or f.default
         for f in target.fields
     }
-    note = render_note(target, field_values, multiline=False)
+    try:
+        note = render_note(target, field_values, multiline=False)
+    except (KeyError, ValueError, IndexError) as exc:
+        return _api_error(
+            f"模板渲染失败：{exc}",
+            error_type="template_error",
+            recovery_hint="请检查填入内容是否包含特殊字符（如大括号 {}），修改后重试。",
+        )
     return jsonify(
         ok=True,
         note=note,
