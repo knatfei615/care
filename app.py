@@ -380,7 +380,14 @@ def template_render():
     }
     try:
         note = render_note(target, field_values, multiline=False)
-    except (KeyError, ValueError, IndexError) as exc:
+    except KeyError as exc:
+        return _api_error(
+            f"模板配置错误：缺少占位符 {exc}",
+            status=500,
+            error_type="config_error",
+            recovery_hint="请联系管理员检查模板配置。",
+        )
+    except (ValueError, IndexError) as exc:
         return _api_error(
             f"模板渲染失败：{exc}",
             error_type="template_error",
