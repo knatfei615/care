@@ -1047,6 +1047,10 @@ async function renderTemplateNote() {
       headers: withCsrfHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ template_id: id, values }),
     });
+    if (!res.ok && res.headers.get("content-type")?.indexOf("json") === -1) {
+      toast("模板填充失败：服务器返回 " + res.status + "，请刷新页面重试", true);
+      return;
+    }
     const data = await res.json();
     if (data.error) {
       toast(formatApiError(data), true);
