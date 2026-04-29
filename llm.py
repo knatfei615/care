@@ -38,7 +38,7 @@ def _build_user_content(patient_info: str, raw_text: str) -> str:
     return (
         "患者基本信息（生成记录时必须作为临床背景使用）：\n"
         f"{patient_info}\n\n"
-        "本次查房口述记录：\n"
+        "本次要求输出的药学监护记录：\n"
         f"{raw_text}"
     )
 
