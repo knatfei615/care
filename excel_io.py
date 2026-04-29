@@ -6,9 +6,11 @@ Re-uses functions from the existing CLI scripts while converting
 
 from __future__ import annotations
 
+from io import BytesIO
 import json
 import shutil
 import threading
+from contextlib import suppress
 from datetime import date, datetime
 from pathlib import Path
 import re
@@ -62,6 +64,16 @@ def _catch(fn, *args, **kwargs):
         return fn(*args, **kwargs)
     except SystemExit as exc:
         raise ExcelError(str(exc)) from exc
+
+
+def _close_workbook(book) -> None:
+    """Close an openpyxl workbook and archives opened by keep_vba."""
+    for attr in ("_archive", "vba_archive"):
+        archive = getattr(book, attr, None)
+        if archive:
+            with suppress(Exception):
+                archive.close()
+    book.close()
 
 
 def _identifier_backup_path(wb_path: Path) -> Path:
@@ -197,6 +209,42 @@ def _build_tracking_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
         "major_issue": _extract_major_issue(latest["note"]) if latest else "",
         "recent_records": recent_records,
     }
+
+
+def _format_prior_note_record(index: int, record: dict[str, Any]) -> str:
+    """Format one prior note record for LLM context."""
+    date_text = record["date"]
+    if not date_text and record["parsed_date"]:
+        date_text = record["parsed_date"].strftime("%Y-%m-%d")
+
+    note_text = re.sub(r"\s+", " ", record["note"]).strip()
+    return (
+        f"记录{index}："
+        f"日期：{date_text or '未填写'}；"
+        f"分级：{record['level'] or '未填写'}；"
+        f"类型：{record['note_type'] or '未填写'}；"
+        f"内容：{note_text}"
+    )
+
+
+def get_prior_note_context(wb_path: Path, row_idx: int, limit: int = 6) -> str:
+    """Return formatted prior note context for LLM generation."""
+    if limit <= 0:
+        return ""
+
+    with _lock:
+        book = openpyxl.load_workbook(BytesIO(wb_path.read_bytes()), keep_vba=True, data_only=True)
+        try:
+            sheet = book[book.sheetnames[0]]
+            _load_patient_row(sheet, row_idx)
+            _, records = _collect_slot_records(sheet, row_idx)
+        finally:
+            _close_workbook(book)
+
+    return "\n".join(
+        _format_prior_note_record(index, record)
+        for index, record in enumerate(records[:limit], start=1)
+    )
 
 
 def backup_workbook_identifiers(wb_path: Path) -> Path:

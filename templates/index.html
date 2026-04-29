@@ -855,7 +855,11 @@ async function generateNote() {
     const res = await fetch("/api/generate", {
       method: "POST",
       headers: withCsrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ raw_text: raw, patient_info: patientInfo }),
+      body: JSON.stringify({
+        raw_text: raw,
+        patient_info: patientInfo,
+        row_idx: selectedPatient ? selectedPatient.row_idx : null,
+      }),
     });
     const data = await res.json();
     if (data.error && !data.note) {
