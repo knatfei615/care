@@ -30,6 +30,7 @@ from excel_io import (
     ExcelError,
     backup_workbook_identifiers,
     find_workbook,
+    get_prior_note_context,
     get_slot_detail,
     get_slot_status_with_summary,
     list_patients,
@@ -328,8 +329,28 @@ def generate():
         return _api_error("请输入查房记录。", error_type="validation_error", recovery_hint="先填写查房口述，再点击 AI 生成。")
 
     patient_info = (data.get("patient_info") or "").strip()
+    prior_notes = ""
+    row_idx = data.get("row_idx")
+    if row_idx not in (None, ""):
+        user_dir = _ensure_user_dir()
+        wb = find_workbook(user_dir)
+        if not wb:
+            return _api_error("云端没有工作簿，请先上传。", status=404, error_type="upload_error", recovery_hint="先上传 .xlsm 或从病例清单创建工作簿。")
+        try:
+            prior_notes = get_prior_note_context(wb, int(row_idx))
+        except (TypeError, ValueError):
+            return _api_error("患者行号格式错误。", error_type="validation_error", recovery_hint="请重新选择患者后再生成。")
+        except ExcelError as exc:
+            return _api_error(str(exc), error_type="excel_error", recovery_hint="请刷新页面后重新选择患者。")
 
-    result = structure_note(OPENAI_API_KEY, OPENAI_MODEL, patient_info, raw_text, OPENAI_BASE_URL)
+    result = structure_note(
+        OPENAI_API_KEY,
+        OPENAI_MODEL,
+        patient_info,
+        raw_text,
+        OPENAI_BASE_URL,
+        prior_notes=prior_notes,
+    )
     return jsonify(result)
 
 
@@ -432,9 +453,9 @@ def save():
 
     skip_structure_check = bool(data.get("skip_structure_check"))
     if not skip_structure_check:
-        required_markers = ("问题：", "分析：", "处理：", "结果/计划：")
+        required_markers = ("主观资料：", "客观资料：", "分析评估：", "药学监护建议：")
         if not all(marker in note_text for marker in required_markers):
-            return _api_error("监护意见缺少四段结构。", error_type="validation_error", recovery_hint="建议包含“问题/分析/处理/结果/计划”四段后再保存。")
+            return _api_error("监护意见缺少四段结构。", error_type="validation_error", recovery_hint="建议包含“主观资料/客观资料/分析评估/药学监护建议”四段后再保存。")
 
     try:
         record_date = datetime.strptime(date_str, "%Y-%m-%d").date()

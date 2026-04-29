@@ -855,7 +855,11 @@ async function generateNote() {
     const res = await fetch("/api/generate", {
       method: "POST",
       headers: withCsrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ raw_text: raw, patient_info: patientInfo }),
+      body: JSON.stringify({
+        raw_text: raw,
+        patient_info: patientInfo,
+        row_idx: selectedPatient ? selectedPatient.row_idx : null,
+      }),
     });
     const data = await res.json();
     if (data.error && !data.note) {
@@ -887,7 +891,7 @@ async function saveNote(forceOverwrite = false, skipStructureCheck = false) {
   if (!noteType) { toast("请先选择监护类型", true); return; }
   if (!dateVal) { toast("请先选择日期", true); return; }
   if (!skipStructureCheck) {
-    const markers = ["问题：", "分析：", "处理：", "结果/计划："];
+    const markers = ["主观资料：", "客观资料：", "分析评估：", "药学监护建议："];
     const hasFullStructure = markers.every(marker => noteText.includes(marker));
     if (!hasFullStructure) {
       const proceed = window.confirm("当前监护意见不完整（缺少四段结构），仍要保存吗？");
