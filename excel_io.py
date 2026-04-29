@@ -108,7 +108,9 @@ def _extract_major_issue(note_text: str) -> str:
     if not note_text:
         return ""
 
-    match = re.search(r"问题：\s*(.*?)\s*(?:分析：|$)", note_text, flags=re.S)
+    match = re.search(r"主观资料：\s*(.*?)\s*(?:客观资料：|$)", note_text, flags=re.S)
+    if not match:
+        match = re.search(r"问题：\s*(.*?)\s*(?:分析：|$)", note_text, flags=re.S)
     if not match:
         return ""
 

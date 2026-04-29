@@ -432,9 +432,9 @@ def save():
 
     skip_structure_check = bool(data.get("skip_structure_check"))
     if not skip_structure_check:
-        required_markers = ("问题：", "分析：", "处理：", "结果/计划：")
+        required_markers = ("主观资料：", "客观资料：", "分析评估：", "药学监护建议：")
         if not all(marker in note_text for marker in required_markers):
-            return _api_error("监护意见缺少四段结构。", error_type="validation_error", recovery_hint="建议包含“问题/分析/处理/结果/计划”四段后再保存。")
+            return _api_error("监护意见缺少四段结构。", error_type="validation_error", recovery_hint="建议包含“主观资料/客观资料/分析评估/药学监护建议”四段后再保存。")
 
     try:
         record_date = datetime.strptime(date_str, "%Y-%m-%d").date()
