@@ -80,6 +80,90 @@ def _identifier_backup_path(wb_path: Path) -> Path:
     return wb_path.with_name(f"{wb_path.stem}.identifiers.json")
 
 
+def _medications_path(wb_path: Path) -> Path:
+    return wb_path.with_name(f"{wb_path.stem}.medications.json")
+
+
+def _load_medications_data(wb_path: Path) -> dict[str, Any]:
+    path = _medications_path(wb_path)
+    if not path.exists():
+        return {"rows": {}}
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {"rows": {}}
+
+    rows = data.get("rows")
+    if not isinstance(rows, dict):
+        rows = {}
+    return {"rows": rows}
+
+
+def get_patient_medications(wb_path: Path, row_idx: int) -> dict[str, str]:
+    """Return medication-order sidecar data for one patient row."""
+    row_key = str(row_idx)
+    with _lock:
+        data = _load_medications_data(wb_path)
+        row = data.get("rows", {}).get(row_key, {})
+
+    if not isinstance(row, dict):
+        row = {}
+    return {
+        "medications": format_cell(row.get("medications")),
+        "updated_at": format_cell(row.get("updated_at")),
+    }
+
+
+def set_patient_medications(wb_path: Path, row_idx: int, medications: str) -> dict[str, str]:
+    """Persist current medication orders for one patient row in a sidecar file."""
+    medication_text = format_cell(medications).strip()[:2000]
+    updated_at = datetime.now().isoformat(timespec="seconds")
+    row_key = str(row_idx)
+
+    with _lock:
+        data = _load_medications_data(wb_path)
+        rows = data.setdefault("rows", {})
+        if not isinstance(rows, dict):
+            rows = {}
+            data["rows"] = rows
+
+        rows[row_key] = {
+            "medications": medication_text,
+            "updated_at": updated_at,
+        }
+
+        _medications_path(wb_path).write_text(
+            json.dumps({"rows": rows}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    return {"medications": medication_text, "updated_at": updated_at}
+
+
+def load_all_medications(wb_path: Path) -> dict[int, str]:
+    """Return all saved medication-order text by patient row index."""
+    with _lock:
+        data = _load_medications_data(wb_path)
+        rows = data.get("rows", {})
+
+    result: dict[int, str] = {}
+    if not isinstance(rows, dict):
+        return result
+
+    for row_idx_text, values in rows.items():
+        if not isinstance(values, dict):
+            continue
+        medications = format_cell(values.get("medications"))
+        if not medications:
+            continue
+        try:
+            result[int(row_idx_text)] = medications
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
 def _parse_excel_date(value: Any) -> datetime | None:
     """Parse excel/date-like values into datetime."""
     if value in (None, ""):

@@ -6,7 +6,7 @@ from openai import OpenAI
 
 SYSTEM_PROMPT = """\
 你是一位资深ICU临床药师，负责将ICU查房口述记录整理为标准药学监护记录。
-你会收到“患者基本信息”、“既往药学监护记录”和“本次要求输出的药学监护记录”。患者基本信息包括年龄、性别、体重、入院日期、入院诊断等，是生成记录时必须结合的临床背景；不要要求用户在查房记录中重复提供这些内容。
+你会收到“患者基本信息”、“既往药学监护记录”和“本次要求输出的药学监护记录”。患者基本信息包括年龄、性别、体重、入院日期、入院诊断等，是生成记录时必须结合的临床背景；不要要求用户在查房记录中重复提供这些内容。你也可能收到“当前药物医嘱”，请将其作为患者目前正在使用的药物背景纳入分析评估与监护建议；若与查房记录冲突，以查房记录为准。
 
 输出格式（一行，不换行）：
 主观资料：<与本次药学监护相关的症状、体征、病史、诊断等>。客观资料：<与本次药学监护相关的检验、检查结果等>。分析评估：<结合患者病理生理状态、疾病特点、用药情况及循证证据等进行分析评估>。药学监护建议：<个体化药物治疗方案建议、疗效和不良反应监护计划、药品不良反应识别与处理建议、患者用药指导等>。
@@ -28,10 +28,16 @@ def _validate(text: str) -> bool:
     return all(m in text for m in _REQUIRED_MARKERS)
 
 
-def _build_user_content(patient_info: str, raw_text: str, prior_notes: str = "") -> str:
+def _build_user_content(
+    patient_info: str,
+    raw_text: str,
+    prior_notes: str = "",
+    current_medications: str = "",
+) -> str:
     """Build the user message with patient context before the free-text note."""
     patient_info = (patient_info or "").strip()
     prior_notes = (prior_notes or "").strip()
+    current_medications = (current_medications or "").strip()
     raw_text = (raw_text or "").strip()
 
     if not patient_info:
@@ -45,6 +51,11 @@ def _build_user_content(patient_info: str, raw_text: str, prior_notes: str = "")
         sections.append(
             "既往药学监护记录（仅作连续性参考，不要原文照抄）：\n"
             f"{prior_notes}"
+        )
+    if current_medications:
+        sections.append(
+            "当前药物医嘱（用户手动维护的最新医嘱，作为本次评估的用药背景）：\n"
+            f"{current_medications}"
         )
     sections.append(
         "本次要求输出的药学监护记录：\n"
@@ -60,6 +71,7 @@ def structure_note(
     raw_text: str,
     base_url: str = "",
     prior_notes: str = "",
+    current_medications: str = "",
 ) -> dict:
     """Call OpenAI-compatible API to structure *raw_text* into a standard note.
 
@@ -67,7 +79,12 @@ def structure_note(
     """
     client = OpenAI(api_key=api_key, base_url=base_url or None)
 
-    user_content = _build_user_content(patient_info, raw_text, prior_notes=prior_notes)
+    user_content = _build_user_content(
+        patient_info,
+        raw_text,
+        prior_notes=prior_notes,
+        current_medications=current_medications,
+    )
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},

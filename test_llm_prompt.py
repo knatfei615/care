@@ -28,6 +28,19 @@ class BuildUserContentTest(unittest.TestCase):
         self.assertLess(content.index("患者基本信息"), content.index("既往药学监护记录"))
         self.assertLess(content.index("既往药学监护记录"), content.index("本次要求输出的药学监护记录"))
 
+    def test_includes_current_medications_between_prior_notes_and_current_note(self):
+        content = _build_user_content(
+            patient_info="年龄：3岁，诊断：重症肺炎",
+            raw_text="今日复评抗感染方案。",
+            prior_notes="记录1：昨日建议关注肾功能。",
+            current_medications="万古霉素 1g q12h IV\n美罗培南 0.5g q8h IV",
+        )
+
+        self.assertIn("当前药物医嘱（用户手动维护的最新医嘱，作为本次评估的用药背景）：", content)
+        self.assertIn("万古霉素 1g q12h IV", content)
+        self.assertLess(content.index("既往药学监护记录"), content.index("当前药物医嘱"))
+        self.assertLess(content.index("当前药物医嘱"), content.index("本次要求输出的药学监护记录"))
+
     def test_omits_prior_notes_section_when_empty(self):
         content = _build_user_content(
             patient_info="年龄：3岁，诊断：重症肺炎",

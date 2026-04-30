@@ -30,14 +30,17 @@ from excel_io import (
     ExcelError,
     backup_workbook_identifiers,
     find_workbook,
+    get_patient_medications,
     get_prior_note_context,
     get_slot_detail,
     get_slot_status_with_summary,
+    load_all_medications,
     list_patients,
     prepare_download_workbook,
     redact_workbook_identifiers,
     redact_workbooks,
     save_note,
+    set_patient_medications,
 )
 from generate_picu_note import load_templates, render_note
 from import_case_list import WorkbookPaths, run_import
@@ -293,8 +296,11 @@ def patients():
         return _api_error("云端没有工作簿，请先上传。", status=404, error_type="upload_error", recovery_hint="上传 .xlsm 工作簿，或使用“从病例清单创建工作簿”。")
     try:
         rows = list_patients(wb)
+        medications_by_row = load_all_medications(wb)
     except ExcelError as exc:
         return _api_error(str(exc), error_type="excel_error", recovery_hint="请检查工作簿格式是否符合监护模板。")
+    for row in rows:
+        row["medications"] = medications_by_row.get(row["row_idx"], "")
     return jsonify(patients=rows)
 
 
@@ -315,6 +321,33 @@ def add_patient_api():
     return jsonify(ok=True, patient=patient)
 
 
+@app.route("/api/patients/<int:row_idx>/medications")
+@login_required
+def patient_medications(row_idx):
+    user_dir = _ensure_user_dir()
+    wb = find_workbook(user_dir)
+    if not wb:
+        return _api_error("云端没有工作簿，请先上传。", status=404, error_type="upload_error", recovery_hint="请先上传工作簿再维护药物医嘱。")
+
+    return jsonify(get_patient_medications(wb, row_idx))
+
+
+@app.route("/api/patients/<int:row_idx>/medications", methods=["PUT"])
+@login_required
+def update_patient_medications(row_idx):
+    user_dir = _ensure_user_dir()
+    wb = find_workbook(user_dir)
+    if not wb:
+        return _api_error("云端没有工作簿，请先上传。", status=404, error_type="upload_error", recovery_hint="请先上传工作簿再维护药物医嘱。")
+
+    data = request.get_json(silent=True) or {}
+    medications = data.get("medications", "")
+    if not isinstance(medications, str):
+        return _api_error("药物医嘱格式错误。", error_type="validation_error", recovery_hint="请填写文本内容后重试。")
+
+    return jsonify(ok=True, **set_patient_medications(wb, row_idx, medications))
+
+
 # ── Generate (LLM) ─────────────────────────────────────────────────
 
 @app.route("/api/generate", methods=["POST"])
@@ -330,6 +363,7 @@ def generate():
 
     patient_info = (data.get("patient_info") or "").strip()
     prior_notes = ""
+    current_medications = ""
     row_idx = data.get("row_idx")
     if row_idx not in (None, ""):
         user_dir = _ensure_user_dir()
@@ -337,7 +371,9 @@ def generate():
         if not wb:
             return _api_error("云端没有工作簿，请先上传。", status=404, error_type="upload_error", recovery_hint="先上传 .xlsm 或从病例清单创建工作簿。")
         try:
-            prior_notes = get_prior_note_context(wb, int(row_idx))
+            row_idx_int = int(row_idx)
+            prior_notes = get_prior_note_context(wb, row_idx_int)
+            current_medications = get_patient_medications(wb, row_idx_int).get("medications", "")
         except (TypeError, ValueError):
             return _api_error("患者行号格式错误。", error_type="validation_error", recovery_hint="请重新选择患者后再生成。")
         except ExcelError as exc:
@@ -350,6 +386,7 @@ def generate():
         raw_text,
         OPENAI_BASE_URL,
         prior_notes=prior_notes,
+        current_medications=current_medications,
     )
     return jsonify(result)
 

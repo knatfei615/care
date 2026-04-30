@@ -38,6 +38,8 @@ body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; backgrou
 .card-head h2 { margin-bottom: 0; }
 .btn-outline { border: 1px solid #2563eb; color: #2563eb; background: #fff; border-radius: 8px; padding: 7px 10px; font-size: 13px; cursor: pointer; min-height: 34px; }
 .add-form { margin-bottom: 10px; padding: 10px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }
+.med-orders { margin-top: 10px; padding: 10px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }
+.med-orders textarea { min-height: 92px; font-size: 14px; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field input { width: 100%; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; }
@@ -213,6 +215,14 @@ textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 
     </div>
     <div class="patient-list" id="patientList"></div>
     <div class="patient-summary hidden" id="patientSummary"></div>
+    <div class="med-orders hidden" id="medOrdersBox">
+      <div class="label">当前药物医嘱（用于 AI 生成上下文）</div>
+      <textarea id="medOrdersInput" rows="4" placeholder="一行一个，如：万古霉素 1g q12h IV"></textarea>
+      <div class="row" style="margin-top:8px;">
+        <button class="btn-outline" id="btnSaveMeds" onclick="saveMedications()">保存药物医嘱</button>
+        <span class="label" id="medOrdersHint"></span>
+      </div>
+    </div>
   </div>
 
   <!-- History -->
@@ -293,6 +303,7 @@ document.addEventListener("DOMContentLoaded", () => {
   checkWorkbook();
   loadUserInfo();
   loadTemplates();
+  document.getElementById("medOrdersInput").addEventListener("input", updateMedOrdersDirtyHint);
 });
 
 async function loadUserInfo() {
@@ -426,6 +437,7 @@ async function loadPatients() {
     }
     renderPatients();
     updatePatientSummary();
+    populateMedications(selectedPatient);
     if (selectedPatient) {
       loadSlotStatuses();
     } else {
@@ -558,6 +570,7 @@ function selectPatient(rowIdx) {
   clearEditingState();
   renderPatients();
   updatePatientSummary();
+  populateMedications(selectedPatient);
   renderPatientTrackingCard();
   loadSlotStatuses();
   // Apply previous defaults
@@ -721,6 +734,86 @@ function updatePatientSummary() {
   el.classList.remove("hidden");
 }
 
+function populateMedications(patient) {
+  const box = document.getElementById("medOrdersBox");
+  const input = document.getElementById("medOrdersInput");
+  const hint = document.getElementById("medOrdersHint");
+  if (!patient) {
+    box.classList.add("hidden");
+    input.value = "";
+    hint.textContent = "";
+    return;
+  }
+
+  input.value = patient.medications || "";
+  box.classList.remove("hidden");
+  updateMedOrdersSavedHint(patient.medications_updated_at || "");
+}
+
+function updateMedOrdersSavedHint(updatedAt) {
+  const input = document.getElementById("medOrdersInput");
+  const hint = document.getElementById("medOrdersHint");
+  if (updatedAt) {
+    const dt = new Date(updatedAt);
+    hint.textContent = Number.isNaN(dt.getTime())
+      ? "已保存"
+      : `上次保存：${dt.toTimeString().slice(0, 5)}`;
+  } else {
+    hint.textContent = input.value.trim() ? "已保存" : "";
+  }
+}
+
+function updateMedOrdersDirtyHint() {
+  const hint = document.getElementById("medOrdersHint");
+  if (!selectedPatient) {
+    hint.textContent = "";
+    return;
+  }
+  const current = document.getElementById("medOrdersInput").value.trim();
+  const saved = (selectedPatient.medications || "").trim();
+  hint.textContent = current === saved ? (current ? "已保存" : "") : "未保存";
+}
+
+async function saveMedications() {
+  if (!selectedPatient) {
+    toast("请先选择患者", true);
+    return;
+  }
+
+  const input = document.getElementById("medOrdersInput");
+  const btn = document.getElementById("btnSaveMeds");
+  btn.disabled = true;
+  btn.textContent = "保存中…";
+  try {
+    const res = await fetch(`/api/patients/${selectedPatient.row_idx}/medications`, {
+      method: "PUT",
+      headers: withCsrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ medications: input.value }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      toast(formatApiError(data), true);
+      return;
+    }
+
+    selectedPatient.medications = data.medications || "";
+    selectedPatient.medications_updated_at = data.updated_at || "";
+    const idx = patients.findIndex(p => p.row_idx === selectedPatient.row_idx);
+    if (idx >= 0) {
+      patients[idx].medications = selectedPatient.medications;
+      patients[idx].medications_updated_at = selectedPatient.medications_updated_at;
+    }
+    input.value = selectedPatient.medications;
+    updateMedOrdersSavedHint(selectedPatient.medications_updated_at);
+    toast("药物医嘱已保存");
+  } catch (e) {
+    toast("保存药物医嘱失败: " + e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "保存药物医嘱";
+  }
+}
+
 function renderPatientTrackingCard() {
   const card = document.getElementById("patientTrackingCard");
   const row = document.getElementById("summaryRow");
@@ -841,6 +934,14 @@ function getActivePill(groupId) {
 async function generateNote() {
   const raw = document.getElementById("rawInput").value.trim();
   if (!raw) { toast("请输入查房记录", true); return; }
+  if (selectedPatient) {
+    const currentMeds = document.getElementById("medOrdersInput").value.trim();
+    const savedMeds = (selectedPatient.medications || "").trim();
+    if (currentMeds !== savedMeds) {
+      const proceed = window.confirm("当前药物医嘱尚未保存，AI 生成将使用上次保存的医嘱。仍要继续吗？");
+      if (!proceed) return;
+    }
+  }
 
   const btn = document.getElementById("btnGenerate");
   btn.disabled = true;

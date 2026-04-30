@@ -4,7 +4,7 @@ from pathlib import Path
 
 import openpyxl
 
-from excel_io import get_prior_note_context
+from excel_io import get_prior_note_context, get_patient_medications, load_all_medications, set_patient_medications
 
 
 class PriorNoteContextTest(unittest.TestCase):
@@ -49,6 +49,31 @@ class PriorNoteContextTest(unittest.TestCase):
             context = get_prior_note_context(wb_path, row_idx=3)
 
         self.assertEqual(context, "")
+
+
+class PatientMedicationsTest(unittest.TestCase):
+    def test_saves_trims_and_loads_medication_sidecar(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wb_path = Path(tmp) / "records.xlsm"
+
+            saved = set_patient_medications(wb_path, 3, "  万古霉素 1g q12h IV  ")
+            one_row = get_patient_medications(wb_path, 3)
+            all_rows = load_all_medications(wb_path)
+
+        self.assertEqual(saved["medications"], "万古霉素 1g q12h IV")
+        self.assertTrue(saved["updated_at"])
+        self.assertEqual(one_row["medications"], "万古霉素 1g q12h IV")
+        self.assertEqual(all_rows, {3: "万古霉素 1g q12h IV"})
+
+    def test_missing_medication_sidecar_returns_empty_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wb_path = Path(tmp) / "records.xlsm"
+
+            one_row = get_patient_medications(wb_path, 3)
+            all_rows = load_all_medications(wb_path)
+
+        self.assertEqual(one_row, {"medications": "", "updated_at": ""})
+        self.assertEqual(all_rows, {})
 
 
 if __name__ == "__main__":
