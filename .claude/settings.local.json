@@ -1,13 +1,5 @@
 {
   "permissions": {
-    "allow": [
-      "Bash(grep -h \"^import\\\\|^from\" /d/药学监护/*.py | sort | uniq)",
-      "Bash(ls -lh /d/药学监护/*.xlsx /d/药学监护/*.xlsm 2>/dev/null | head -20)",
-      "Bash(wc -l /d/药学监护/*.py)",
-      "Bash(tree -L 2 -I '__pycache__' /d/药学监护 2>/dev/null || find /d/药学监护 -maxdepth 2 -not -path '*__pycache__*' -not -path '*.~*' | sort)",
-      "Bash(cd \"D:/药学监护\" && pip install flask openpyxl openai python-dotenv gunicorn 2>&1 | tail -5)",
-      "Bash(cd \"D:/药学监护\" && python -c \"import config; import excel_io; import llm; import app; print\\('All modules imported OK'\\)\")",
-      "Bash(cd \"D:/药学监护\" && python -c \"import config; import llm; import app; print\\('OK'\\); print\\(f'base_url={config.OPENAI_BASE_URL}'\\); print\\(f'model={config.OPENAI_MODEL}'\\)\")"
-    ]
+    "allow": []
   }
 }
