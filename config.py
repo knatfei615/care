@@ -13,9 +13,9 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "anthropic/claude-sonnet-4-6")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "sk-6fe13ee0e4cf4dfb98c0728f31ece3e0")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.deepseek.com")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "deepseek-v4-pro")
 DATA_DIR = Path(os.environ.get("DATA_DIR", "./data"))
 RECORD_TEMPLATE_PATH = Path(os.environ.get("RECORD_TEMPLATE_PATH", "")).expanduser() if os.environ.get("RECORD_TEMPLATE_PATH") else None
 PORT = int(os.environ.get("PORT", "5000"))
