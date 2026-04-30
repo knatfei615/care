@@ -1,10 +1,19 @@
 import tempfile
 import unittest
+import json
+from io import BytesIO
 from pathlib import Path
 
 import openpyxl
 
-from excel_io import get_prior_note_context, get_patient_medications, load_all_medications, set_patient_medications
+from excel_io import (
+    build_ai_patient_info,
+    get_prior_note_context,
+    get_patient_medications,
+    load_all_medications,
+    restore_anonymized_workbook,
+    set_patient_medications,
+)
 
 
 class PriorNoteContextTest(unittest.TestCase):
@@ -74,6 +83,86 @@ class PatientMedicationsTest(unittest.TestCase):
 
         self.assertEqual(one_row, {"medications": "", "updated_at": ""})
         self.assertEqual(all_rows, {})
+
+
+class PatientIdentifierMigrationTest(unittest.TestCase):
+    def test_build_ai_patient_info_excludes_name_and_inpatient_number(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wb_path = Path(tmp) / "records.xlsm"
+            workbook = openpyxl.Workbook()
+            sheet = workbook.active
+            sheet["D3"] = "12345"
+            sheet["E3"] = "PICU-01"
+            sheet["F3"] = "测试患儿"
+            sheet["G3"] = "3岁"
+            sheet["H3"] = "男"
+            sheet["I3"] = "14"
+            sheet["J3"] = "2026-04-30"
+            sheet["K3"] = "重症肺炎"
+            workbook.save(wb_path)
+            workbook.close()
+
+            patient_info = build_ai_patient_info(wb_path, row_idx=3)
+
+        self.assertIn("床号：PICU-01", patient_info)
+        self.assertIn("年龄：3岁", patient_info)
+        self.assertIn("入院诊断：重症肺炎", patient_info)
+        self.assertNotIn("12345", patient_info)
+        self.assertNotIn("测试患儿", patient_info)
+        self.assertNotIn("住院号", patient_info)
+        self.assertNotIn("姓名", patient_info)
+
+    def test_restore_anonymized_workbook_restores_exact_old_aliases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wb_path = Path(tmp) / "records.xlsm"
+            backup_path = Path(tmp) / "records.identifiers.json"
+            workbook = openpyxl.Workbook()
+            sheet = workbook.active
+            sheet["D3"] = "ANON-0001"
+            sheet["F3"] = "匿名患者001"
+            workbook.save(wb_path)
+            workbook.close()
+            backup_path.write_text(
+                json.dumps({"rows": {"3": {"inpatient_no": "12345", "name": "测试患儿"}}}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            changed = restore_anonymized_workbook(wb_path)
+            restored = openpyxl.load_workbook(BytesIO(wb_path.read_bytes()))
+            sheet = restored.active
+
+            self.assertTrue(changed)
+            self.assertEqual(sheet["D3"].value, "12345")
+            self.assertEqual(sheet["F3"].value, "测试患儿")
+            self.assertFalse(backup_path.exists())
+            self.assertTrue(Path(tmp, "records.identifiers.json.migrated").exists())
+            restored.close()
+
+    def test_restore_anonymized_workbook_does_not_overwrite_non_alias_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wb_path = Path(tmp) / "records.xlsm"
+            backup_path = Path(tmp) / "records.identifiers.json"
+            workbook = openpyxl.Workbook()
+            sheet = workbook.active
+            sheet["D3"] = "USER-EDITED-ID"
+            sheet["F3"] = "用户已改名"
+            workbook.save(wb_path)
+            workbook.close()
+            backup_path.write_text(
+                json.dumps({"rows": {"3": {"inpatient_no": "12345", "name": "测试患儿"}}}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            changed = restore_anonymized_workbook(wb_path)
+            restored = openpyxl.load_workbook(BytesIO(wb_path.read_bytes()))
+            sheet = restored.active
+
+            self.assertFalse(changed)
+            self.assertEqual(sheet["D3"].value, "USER-EDITED-ID")
+            self.assertEqual(sheet["F3"].value, "用户已改名")
+            self.assertFalse(backup_path.exists())
+            self.assertTrue(Path(tmp, "records.identifiers.json.migrated").exists())
+            restored.close()
 
 
 if __name__ == "__main__":

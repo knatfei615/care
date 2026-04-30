@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import openpyxl
-from flask import Flask, after_this_request, jsonify, render_template, request, send_file
+from flask import Flask, jsonify, render_template, request, send_file
 from flask_login import current_user, login_required
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 from werkzeug.utils import secure_filename
@@ -27,8 +27,8 @@ from config import (
 )
 from excel_io import (
     add_patient,
+    build_ai_patient_info,
     ExcelError,
-    backup_workbook_identifiers,
     find_workbook,
     get_patient_medications,
     get_prior_note_context,
@@ -36,9 +36,7 @@ from excel_io import (
     get_slot_status_with_summary,
     load_all_medications,
     list_patients,
-    prepare_download_workbook,
-    redact_workbook_identifiers,
-    redact_workbooks,
+    restore_anonymized_workbook,
     save_note,
     set_patient_medications,
 )
@@ -78,7 +76,13 @@ def _user_data_dir() -> Path:
 def _ensure_user_dir() -> Path:
     d = _user_data_dir()
     d.mkdir(parents=True, exist_ok=True)
-    redact_workbooks(d)
+    for wb_path in d.glob("*.xlsm"):
+        if wb_path.name.startswith("~"):
+            continue
+        try:
+            restore_anonymized_workbook(wb_path)
+        except (ExcelError, OSError):
+            pass
     return d
 
 
@@ -127,8 +131,6 @@ def upload():
 
     dest = user_dir / filename
     file.save(str(dest))
-    backup_workbook_identifiers(dest)
-    redact_workbook_identifiers(dest)
     return jsonify(ok=True, filename=filename)
 
 
@@ -237,8 +239,6 @@ def import_caselist():
             ),
             args,
         )
-        backup_workbook_identifiers(output_wb)
-        redact_workbook_identifiers(output_wb)
     except SystemExit:
         return _api_error(
             "病例清单导入失败。",
@@ -269,20 +269,7 @@ def download():
     wb = find_workbook(user_dir)
     if not wb:
         return _api_error("云端没有工作簿，请先上传。", status=404, error_type="upload_error", recovery_hint="先上传 .xlsm 或从病例清单创建工作簿。")
-    try:
-        export_wb = prepare_download_workbook(wb)
-    except ExcelError as exc:
-        return _api_error(str(exc), error_type="excel_error", recovery_hint="请重新上传原始工作簿后再下载。")
-
-    @after_this_request
-    def cleanup_export(response):
-        try:
-            export_wb.unlink(missing_ok=True)
-        except OSError:
-            pass
-        return response
-
-    return send_file(str(export_wb), as_attachment=True, download_name=wb.name)
+    return send_file(str(wb), as_attachment=True, download_name=wb.name)
 
 
 # ── Patients ────────────────────────────────────────────────────────
@@ -361,7 +348,7 @@ def generate():
     if not raw_text:
         return _api_error("请输入查房记录。", error_type="validation_error", recovery_hint="先填写查房口述，再点击 AI 生成。")
 
-    patient_info = (data.get("patient_info") or "").strip()
+    patient_info = ""
     prior_notes = ""
     current_medications = ""
     row_idx = data.get("row_idx")
@@ -372,6 +359,7 @@ def generate():
             return _api_error("云端没有工作簿，请先上传。", status=404, error_type="upload_error", recovery_hint="先上传 .xlsm 或从病例清单创建工作簿。")
         try:
             row_idx_int = int(row_idx)
+            patient_info = build_ai_patient_info(wb, row_idx_int)
             prior_notes = get_prior_note_context(wb, row_idx_int)
             current_medications = get_patient_medications(wb, row_idx_int).get("medications", "")
         except (TypeError, ValueError):

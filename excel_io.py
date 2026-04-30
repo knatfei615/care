@@ -8,14 +8,12 @@ from __future__ import annotations
 
 from io import BytesIO
 import json
-import shutil
 import threading
 from contextlib import suppress
 from datetime import date, datetime
 from pathlib import Path
 import re
 from typing import Any
-from uuid import uuid4
 
 import openpyxl
 
@@ -331,78 +329,70 @@ def get_prior_note_context(wb_path: Path, row_idx: int, limit: int = 6) -> str:
     )
 
 
-def backup_workbook_identifiers(wb_path: Path) -> Path:
-    """Persist original patient identifiers so downloads can restore them."""
-    with _lock:
-        book = openpyxl.load_workbook(wb_path, keep_vba=True, data_only=False)
-        sheet = book[book.sheetnames[0]]
-        rows: dict[str, dict[str, str]] = {}
+def _migrated_identifier_backup_path(backup_path: Path) -> Path:
+    migrated_path = backup_path.with_name(f"{backup_path.name}.migrated")
+    if not migrated_path.exists():
+        return migrated_path
 
-        for row_idx in range(START_ROW, MAX_ROW + 1):
-            raw_id = format_cell(sheet[f"{ID_COLUMN}{row_idx}"].value)
-            raw_name = format_cell(sheet[f"{NAME_COLUMN}{row_idx}"].value)
-            if not raw_id and not raw_name:
-                continue
-            rows[str(row_idx)] = {
-                "inpatient_no": raw_id,
-                "name": raw_name,
-            }
-
-        book.close()
-
-    backup_path = _identifier_backup_path(wb_path)
-    backup_path.write_text(
-        json.dumps({"rows": rows}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return backup_path
+    for index in range(1, 1000):
+        candidate = backup_path.with_name(f"{backup_path.name}.migrated.{index}")
+        if not candidate.exists():
+            return candidate
+    raise ExcelError("无法生成 identifiers 迁移备份文件名。")
 
 
-def upsert_backup_identifier_row(wb_path: Path, row_idx: int, inpatient_no: str, name: str) -> Path:
-    """Update one row in identifier backup without rewriting existing rows."""
-    backup_path = _identifier_backup_path(wb_path)
-    rows: dict[str, dict[str, str]] = {}
-    if backup_path.exists():
-        try:
-            backup_data = json.loads(backup_path.read_text(encoding="utf-8"))
-            rows = backup_data.get("rows", {})
-        except (json.JSONDecodeError, OSError):
-            rows = {}
-
-    rows[str(row_idx)] = {
-        "inpatient_no": inpatient_no,
-        "name": name,
-    }
-    backup_path.write_text(
-        json.dumps({"rows": rows}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return backup_path
-
-
-def prepare_download_workbook(wb_path: Path) -> Path:
-    """Create a temporary workbook copy with original identifiers restored."""
+def restore_anonymized_workbook(wb_path: Path) -> bool:
+    """Restore old row-based aliases from the identifier sidecar if present."""
     backup_path = _identifier_backup_path(wb_path)
     if not backup_path.exists():
-        raise ExcelError("未找到原始姓名/住院号备份，当前文件无法恢复下载。请重新上传原始工作簿。")
+        return False
 
-    backup_data = json.loads(backup_path.read_text(encoding="utf-8"))
+    try:
+        backup_data = json.loads(backup_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return False
+
     rows = backup_data.get("rows", {})
-    export_path = wb_path.with_name(f"{TEMP_EXPORT_PREFIX}{uuid4().hex}-{wb_path.name}")
-    shutil.copy2(wb_path, export_path)
+    if not isinstance(rows, dict):
+        return False
 
+    changed = False
     with _lock:
-        book = openpyxl.load_workbook(export_path, keep_vba=True)
-        sheet = book[book.sheetnames[0]]
+        book = openpyxl.load_workbook(BytesIO(wb_path.read_bytes()), keep_vba=True)
+        try:
+            sheet = book[book.sheetnames[0]]
+            for row_idx_text, values in rows.items():
+                if not isinstance(values, dict):
+                    continue
+                try:
+                    row_idx = int(row_idx_text)
+                except (TypeError, ValueError):
+                    continue
+                if row_idx < START_ROW or row_idx > MAX_ROW:
+                    continue
 
-        for row_idx_text, values in rows.items():
-            row_idx = int(row_idx_text)
-            sheet[f"{ID_COLUMN}{row_idx}"] = values.get("inpatient_no", "")
-            sheet[f"{NAME_COLUMN}{row_idx}"] = values.get("name", "")
+                alias_num = row_idx - START_ROW + 1
+                expected_id = f"{ANON_ID_PREFIX}{alias_num:04d}"
+                expected_name = f"{ANON_NAME_PREFIX}{alias_num:03d}"
+                current_id = format_cell(sheet[f"{ID_COLUMN}{row_idx}"].value)
+                current_name = format_cell(sheet[f"{NAME_COLUMN}{row_idx}"].value)
+                real_id = format_cell(values.get("inpatient_no"))
+                real_name = format_cell(values.get("name"))
 
-        book.save(export_path)
-        book.close()
-    return export_path
+                if current_id == expected_id and real_id:
+                    sheet[f"{ID_COLUMN}{row_idx}"] = real_id
+                    changed = True
+                if current_name == expected_name and real_name:
+                    sheet[f"{NAME_COLUMN}{row_idx}"] = real_name
+                    changed = True
+
+            if changed:
+                book.save(wb_path)
+        finally:
+            _close_workbook(book)
+
+    backup_path.rename(_migrated_identifier_backup_path(backup_path))
+    return changed
 
 
 # ── workbook discovery ──────────────────────────────────────────────
@@ -423,91 +413,65 @@ def find_workbook(data_dir: Path) -> Path | None:
     return max(candidates, key=lambda p: p.stat().st_mtime)
 
 
-def redact_workbook_identifiers(wb_path: Path) -> bool:
-    """Replace patient name / inpatient number with row-based aliases."""
-    changed = False
-    with _lock:
-        book = openpyxl.load_workbook(wb_path, keep_vba=True)
-        sheet = book[book.sheetnames[0]]
-
-        for row_idx in range(START_ROW, MAX_ROW + 1):
-            raw_id = format_cell(sheet[f"{ID_COLUMN}{row_idx}"].value)
-            raw_name = format_cell(sheet[f"{NAME_COLUMN}{row_idx}"].value)
-            if not raw_id and not raw_name:
-                continue
-
-            alias_num = row_idx - START_ROW + 1
-            masked_id = f"{ANON_ID_PREFIX}{alias_num:04d}"
-            masked_name = f"{ANON_NAME_PREFIX}{alias_num:03d}"
-
-            if raw_id != masked_id:
-                sheet[f"{ID_COLUMN}{row_idx}"] = masked_id
-                changed = True
-            if raw_name != masked_name:
-                sheet[f"{NAME_COLUMN}{row_idx}"] = masked_name
-                changed = True
-
-        if changed:
-            book.save(wb_path)
-        book.close()
-
-    return changed
-
-
-def redact_workbooks(data_dir: Path) -> int:
-    """Redact every workbook in the data directory. Returns changed file count."""
-    if not data_dir.is_dir():
-        return 0
-
-    changed = 0
-    for wb_path in data_dir.iterdir():
-        if (
-            wb_path.is_file()
-            and wb_path.suffix.lower() == ".xlsm"
-            and not wb_path.name.startswith(TEMP_PREFIX)
-            and not wb_path.name.startswith(TEMP_EXPORT_PREFIX)
-        ):
-            if redact_workbook_identifiers(wb_path):
-                changed += 1
-    return changed
-
-
 # ── patient list ────────────────────────────────────────────────────
 
 def list_patients(wb_path: Path) -> list[dict]:
     """Return a JSON-friendly list of patients with previous defaults."""
     with _lock:
-        book = openpyxl.load_workbook(wb_path, keep_vba=True, data_only=True)
-        sheet = book[book.sheetnames[0]]
-        patients = load_patient_rows(sheet)
-        result = []
-        for p in patients:
-            prev_level, prev_type = find_previous_defaults(sheet, p)
-            _, records = _collect_slot_records(sheet, p.row_idx)
-            latest = records[0] if records else None
-            latest_dt = latest["parsed_date"] if latest else None
-            last_note_date = ""
-            if latest:
-                last_note_date = latest["date"] or (latest_dt.strftime("%Y-%m-%d") if latest_dt else "")
-            status = _compute_status(latest_dt)
-            result.append({
-                "row_idx": p.row_idx,
-                "inpatient_no": p.inpatient_no,
-                "bed_no": p.bed_no,
-                "name": p.name,
-                "age": p.age,
-                "sex": p.sex,
-                "weight": p.weight,
-                "admission_date": p.admission_date,
-                "diagnosis": p.diagnosis,
-                "prev_level": prev_level,
-                "prev_type": prev_type,
-                "last_note_date": last_note_date,
-                "status": status,
-                "tags": _extract_tags_from_diagnosis(p.diagnosis),
-            })
-        book.close()
+        book = openpyxl.load_workbook(BytesIO(wb_path.read_bytes()), keep_vba=True, data_only=True)
+        try:
+            sheet = book[book.sheetnames[0]]
+            patients = load_patient_rows(sheet)
+            result = []
+            for p in patients:
+                prev_level, prev_type = find_previous_defaults(sheet, p)
+                _, records = _collect_slot_records(sheet, p.row_idx)
+                latest = records[0] if records else None
+                latest_dt = latest["parsed_date"] if latest else None
+                last_note_date = ""
+                if latest:
+                    last_note_date = latest["date"] or (latest_dt.strftime("%Y-%m-%d") if latest_dt else "")
+                status = _compute_status(latest_dt)
+                result.append({
+                    "row_idx": p.row_idx,
+                    "inpatient_no": p.inpatient_no,
+                    "bed_no": p.bed_no,
+                    "name": p.name,
+                    "age": p.age,
+                    "sex": p.sex,
+                    "weight": p.weight,
+                    "admission_date": p.admission_date,
+                    "diagnosis": p.diagnosis,
+                    "prev_level": prev_level,
+                    "prev_type": prev_type,
+                    "last_note_date": last_note_date,
+                    "status": status,
+                    "tags": _extract_tags_from_diagnosis(p.diagnosis),
+                })
+        finally:
+            _close_workbook(book)
     return result
+
+
+def build_ai_patient_info(wb_path: Path, row_idx: int) -> str:
+    """Return patient context for the LLM without name or inpatient number."""
+    with _lock:
+        book = openpyxl.load_workbook(BytesIO(wb_path.read_bytes()), keep_vba=True, data_only=True)
+        try:
+            sheet = book[book.sheetnames[0]]
+            patient = _load_patient_row(sheet, row_idx)
+        finally:
+            _close_workbook(book)
+
+    parts = [
+        f"床号：{patient.bed_no}" if patient.bed_no else "",
+        f"年龄：{patient.age}" if patient.age else "",
+        f"性别：{patient.sex}" if patient.sex else "",
+        f"体重：{patient.weight}kg" if patient.weight else "",
+        f"入院日期：{patient.admission_date}" if patient.admission_date else "",
+        f"入院诊断：{patient.diagnosis}" if patient.diagnosis else "",
+    ]
+    return "，".join(part for part in parts if part)
 
 
 def _clean_patient_payload(payload: dict[str, Any]) -> dict[str, str]:
@@ -535,33 +499,26 @@ def add_patient(wb_path: Path, payload: dict[str, Any]) -> dict[str, Any]:
 
     target_row: int | None = None
     with _lock:
-        book = openpyxl.load_workbook(wb_path, keep_vba=True)
-        sheet = book[book.sheetnames[0]]
+        book = openpyxl.load_workbook(BytesIO(wb_path.read_bytes()), keep_vba=True)
+        try:
+            sheet = book[book.sheetnames[0]]
 
-        for row_idx in range(START_ROW, MAX_ROW + 1):
-            inpatient_no = format_cell(sheet[f"D{row_idx}"].value)
-            name = format_cell(sheet[f"F{row_idx}"].value)
-            if not inpatient_no and not name:
-                target_row = row_idx
-                break
+            for row_idx in range(START_ROW, MAX_ROW + 1):
+                inpatient_no = format_cell(sheet[f"D{row_idx}"].value)
+                name = format_cell(sheet[f"F{row_idx}"].value)
+                if not inpatient_no and not name:
+                    target_row = row_idx
+                    break
 
-        if target_row is None:
-            book.close()
-            raise ExcelError(f"患者区域已满（{START_ROW}-{MAX_ROW} 行）。")
+            if target_row is None:
+                raise ExcelError(f"患者区域已满（{START_ROW}-{MAX_ROW} 行）。")
 
-        for column in BASE_COLUMNS:
-            sheet[f"{column}{target_row}"] = row_data[column]
+            for column in BASE_COLUMNS:
+                sheet[f"{column}{target_row}"] = row_data[column]
 
-        book.save(wb_path)
-        book.close()
-
-    upsert_backup_identifier_row(
-        wb_path=wb_path,
-        row_idx=target_row,
-        inpatient_no=row_data["D"],
-        name=row_data["F"],
-    )
-    redact_workbook_identifiers(wb_path)
+            book.save(wb_path)
+        finally:
+            _close_workbook(book)
 
     return {
         "row_idx": target_row,
@@ -607,24 +564,28 @@ def _load_patient_row(sheet, row_idx: int) -> PatientRow:
 def get_slot_status(wb_path: Path, row_idx: int) -> list[dict]:
     """Return the occupancy status of all 6 note slots for a given row."""
     with _lock:
-        book = openpyxl.load_workbook(wb_path, keep_vba=True, data_only=True)
-        sheet = book[book.sheetnames[0]]
-        _load_patient_row(sheet, row_idx)
-        result, _ = _collect_slot_records(sheet, row_idx)
-        book.close()
+        book = openpyxl.load_workbook(BytesIO(wb_path.read_bytes()), keep_vba=True, data_only=True)
+        try:
+            sheet = book[book.sheetnames[0]]
+            _load_patient_row(sheet, row_idx)
+            result, _ = _collect_slot_records(sheet, row_idx)
+        finally:
+            _close_workbook(book)
     return result
 
 
 def get_slot_status_with_summary(wb_path: Path, row_idx: int) -> dict[str, Any]:
     """Return slot status with patient tracking summary for a row."""
     with _lock:
-        book = openpyxl.load_workbook(wb_path, keep_vba=True, data_only=True)
-        sheet = book[book.sheetnames[0]]
-        _load_patient_row(sheet, row_idx)
-        slots, records = _collect_slot_records(sheet, row_idx)
-        summary = _build_tracking_summary(records)
-        summary["status"] = _compute_status(records[0]["parsed_date"] if records else None)
-        book.close()
+        book = openpyxl.load_workbook(BytesIO(wb_path.read_bytes()), keep_vba=True, data_only=True)
+        try:
+            sheet = book[book.sheetnames[0]]
+            _load_patient_row(sheet, row_idx)
+            slots, records = _collect_slot_records(sheet, row_idx)
+            summary = _build_tracking_summary(records)
+            summary["status"] = _compute_status(records[0]["parsed_date"] if records else None)
+        finally:
+            _close_workbook(book)
     return {"slots": slots, "summary": summary}
 
 
@@ -635,15 +596,17 @@ def get_slot_detail(wb_path: Path, row_idx: int, slot_index: int) -> dict:
         raise ExcelError("记录槽位必须为 1-6。")
 
     with _lock:
-        book = openpyxl.load_workbook(wb_path, keep_vba=True, data_only=True)
-        sheet = book[book.sheetnames[0]]
-        _load_patient_row(sheet, row_idx)
+        book = openpyxl.load_workbook(BytesIO(wb_path.read_bytes()), keep_vba=True, data_only=True)
+        try:
+            sheet = book[book.sheetnames[0]]
+            _load_patient_row(sheet, row_idx)
 
-        note_val = format_cell(sheet[f"{slot['note']}{row_idx}"].value)
-        date_val = format_cell(sheet[f"{slot['date']}{row_idx}"].value)
-        level_val = format_cell(sheet[f"{slot['level']}{row_idx}"].value)
-        type_val = format_cell(sheet[f"{slot['type']}{row_idx}"].value)
-        book.close()
+            note_val = format_cell(sheet[f"{slot['note']}{row_idx}"].value)
+            date_val = format_cell(sheet[f"{slot['date']}{row_idx}"].value)
+            level_val = format_cell(sheet[f"{slot['level']}{row_idx}"].value)
+            type_val = format_cell(sheet[f"{slot['type']}{row_idx}"].value)
+        finally:
+            _close_workbook(book)
 
     return {
         "index": slot["index"],
@@ -668,23 +631,25 @@ def save_note(
 ) -> dict:
     """Write a note into the workbook and return a summary dict."""
     with _lock:
-        book = openpyxl.load_workbook(wb_path, keep_vba=True)
-        sheet = book[book.sheetnames[0]]
-        patient = _load_patient_row(sheet, row_idx)
+        book = openpyxl.load_workbook(BytesIO(wb_path.read_bytes()), keep_vba=True)
+        try:
+            sheet = book[book.sheetnames[0]]
+            patient = _load_patient_row(sheet, row_idx)
 
-        slot = _catch(resolve_slot, sheet, patient, overwrite_slot)
+            slot = _catch(resolve_slot, sheet, patient, overwrite_slot)
 
-        write_note_to_sheet(
-            sheet=sheet,
-            patient=patient,
-            slot=slot,
-            record_date=record_date,
-            level=level,
-            note_type=note_type,
-            note=note_text,
-        )
-        book.save(wb_path)
-        book.close()
+            write_note_to_sheet(
+                sheet=sheet,
+                patient=patient,
+                slot=slot,
+                record_date=record_date,
+                level=level,
+                note_type=note_type,
+                note=note_text,
+            )
+            book.save(wb_path)
+        finally:
+            _close_workbook(book)
     return {
         "row_idx": row_idx,
         "name": patient.name,

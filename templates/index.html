@@ -198,7 +198,7 @@ textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 
         <button class="btn-outline" onclick="closeAddPatientForm()">取消</button>
       </div>
     </div>
-    <input class="search-input" id="searchInput" type="text" placeholder="搜索床号、诊断或匿名编号…" oninput="filterPatients()">
+    <input class="search-input" id="searchInput" type="text" placeholder="搜索姓名、住院号、床号或诊断…" oninput="filterPatients()">
     <div class="filter-row">
       <select id="statusFilter" onchange="filterPatients()">
         <option value="">全部状态</option>
@@ -947,18 +947,12 @@ async function generateNote() {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span>生成中…';
 
-  let patientInfo = "";
-  if (selectedPatient) {
-    patientInfo = buildPatientInfoText(selectedPatient);
-  }
-
   try {
     const res = await fetch("/api/generate", {
       method: "POST",
       headers: withCsrfHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         raw_text: raw,
-        patient_info: patientInfo,
         row_idx: selectedPatient ? selectedPatient.row_idx : null,
       }),
     });
