@@ -8,9 +8,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import openpyxl
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for
 from flask_login import current_user, login_required
-from flask_wtf.csrf import CSRFProtect, generate_csrf
+from flask_wtf.csrf import CSRFError, CSRFProtect, generate_csrf
 from werkzeug.utils import secure_filename
 
 from config import (
@@ -96,6 +96,31 @@ def _api_error(
     if recovery_hint:
         payload["recovery_hint"] = recovery_hint
     return jsonify(payload), status
+
+
+@login_manager.unauthorized_handler
+def _login_required_error():
+    if request.path.startswith("/api/"):
+        return _api_error(
+            "请先登录。",
+            status=401,
+            error_type="auth_error",
+            recovery_hint="请刷新页面并重新登录后再试。",
+        )
+    next_page = request.full_path if request.query_string else request.path
+    return redirect(url_for("auth.login", next=next_page))
+
+
+@app.errorhandler(CSRFError)
+def _csrf_error(exc):
+    if request.path.startswith("/api/"):
+        return _api_error(
+            "请求安全校验失败。",
+            status=400,
+            error_type="csrf_error",
+            recovery_hint="请刷新页面后重试；如果仍失败，请重新登录。",
+        )
+    return exc.description, 400
 
 
 @app.route("/healthz")
