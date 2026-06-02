@@ -1,5 +1,7 @@
 import unittest
+from unittest.mock import patch
 
+import llm
 from llm import _build_user_content
 
 
@@ -49,6 +51,37 @@ class BuildUserContentTest(unittest.TestCase):
         )
 
         self.assertNotIn("既往药学监护记录", content)
+
+
+class StructureNoteCallTest(unittest.TestCase):
+    def test_allows_longer_generated_monitoring_record(self):
+        seen_kwargs = {}
+
+        class FakeCompletions:
+            def create(self, **kwargs):
+                seen_kwargs.update(kwargs)
+                message = type("Message", (), {
+                    "content": "主观资料：患儿病情稳定。客观资料：监测指标较前改善。分析评估：治疗方案可继续观察疗效。药学监护建议：继续监测疗效及不良反应。"
+                })()
+                choice = type("Choice", (), {"message": message})()
+                return type("Response", (), {"choices": [choice]})()
+
+        class FakeClient:
+            def __init__(self, api_key, base_url=None):
+                self.chat = type("Chat", (), {
+                    "completions": FakeCompletions()
+                })()
+
+        with patch.object(llm, "OpenAI", FakeClient):
+            result = llm.structure_note(
+                api_key="test-key",
+                model="test-model",
+                patient_info="年龄：3岁，诊断：重症肺炎",
+                raw_text="初始监护记录较长，需要生成完整四段式记录。",
+            )
+
+        self.assertIsNone(result["error"])
+        self.assertEqual(seen_kwargs["max_tokens"], 2500)
 
 
 if __name__ == "__main__":

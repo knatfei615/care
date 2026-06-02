@@ -21,6 +21,7 @@ SYSTEM_PROMPT = """\
 """
 
 _REQUIRED_MARKERS = ["主观资料：", "客观资料：", "分析评估：", "药学监护建议："]
+_MAX_GENERATED_TOKENS = 2500
 
 
 def _validate(text: str) -> bool:
@@ -97,7 +98,7 @@ def structure_note(
                 model=model,
                 messages=messages,
                 temperature=0.3,
-                max_tokens=1000,
+                max_tokens=_MAX_GENERATED_TOKENS,
             )
             note = resp.choices[0].message.content.strip()
         except Exception as exc:
