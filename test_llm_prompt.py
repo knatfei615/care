@@ -56,6 +56,7 @@ class BuildUserContentTest(unittest.TestCase):
 class StructureNoteCallTest(unittest.TestCase):
     def test_allows_longer_generated_monitoring_record(self):
         seen_kwargs = {}
+        seen_client_kwargs = {}
 
         class FakeCompletions:
             def create(self, **kwargs):
@@ -67,7 +68,8 @@ class StructureNoteCallTest(unittest.TestCase):
                 return type("Response", (), {"choices": [choice]})()
 
         class FakeClient:
-            def __init__(self, api_key, base_url=None):
+            def __init__(self, api_key, base_url=None, **kwargs):
+                seen_client_kwargs.update(kwargs)
                 self.chat = type("Chat", (), {
                     "completions": FakeCompletions()
                 })()
@@ -82,6 +84,7 @@ class StructureNoteCallTest(unittest.TestCase):
 
         self.assertIsNone(result["error"])
         self.assertEqual(seen_kwargs["max_tokens"], 2500)
+        self.assertEqual(seen_client_kwargs["timeout"], 75)
 
 
 if __name__ == "__main__":

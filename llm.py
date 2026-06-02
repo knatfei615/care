@@ -22,6 +22,7 @@ SYSTEM_PROMPT = """\
 
 _REQUIRED_MARKERS = ["主观资料：", "客观资料：", "分析评估：", "药学监护建议："]
 _MAX_GENERATED_TOKENS = 2500
+_LLM_REQUEST_TIMEOUT_SECONDS = 75
 
 
 def _validate(text: str) -> bool:
@@ -78,7 +79,11 @@ def structure_note(
 
     Returns ``{"note": str, "error": str | None}``.
     """
-    client = OpenAI(api_key=api_key, base_url=base_url or None)
+    client = OpenAI(
+        api_key=api_key,
+        base_url=base_url or None,
+        timeout=_LLM_REQUEST_TIMEOUT_SECONDS,
+    )
 
     user_content = _build_user_content(
         patient_info,

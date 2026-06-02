@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from app import app
 
@@ -7,11 +8,15 @@ class ApiErrorResponseTest(unittest.TestCase):
     def setUp(self):
         self.original_testing = app.config.get("TESTING")
         self.original_csrf_enabled = app.config.get("WTF_CSRF_ENABLED", True)
+        self.original_login_disabled = app.config.get("LOGIN_DISABLED", False)
+        self.original_max_content_length = app.config.get("MAX_CONTENT_LENGTH")
         app.config["TESTING"] = True
 
     def tearDown(self):
         app.config["TESTING"] = self.original_testing
         app.config["WTF_CSRF_ENABLED"] = self.original_csrf_enabled
+        app.config["LOGIN_DISABLED"] = self.original_login_disabled
+        app.config["MAX_CONTENT_LENGTH"] = self.original_max_content_length
 
     def test_api_csrf_failure_returns_json(self):
         app.config["WTF_CSRF_ENABLED"] = True
@@ -37,6 +42,21 @@ class ApiErrorResponseTest(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(payload["error_type"], "auth_error")
         self.assertIn("重新登录", payload["recovery_hint"])
+
+    def test_api_request_too_large_returns_json(self):
+        app.config["WTF_CSRF_ENABLED"] = False
+        app.config["LOGIN_DISABLED"] = True
+        app.config["MAX_CONTENT_LENGTH"] = 128
+        client = app.test_client()
+
+        with patch("app.OPENAI_API_KEY", "test-key"):
+            response = client.post("/api/generate", json={"raw_text": "x" * 1000})
+
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.mimetype, "application/json")
+        payload = response.get_json()
+        self.assertEqual(payload["error_type"], "request_too_large")
+        self.assertIn("缩短", payload["recovery_hint"])
 
 
 if __name__ == "__main__":

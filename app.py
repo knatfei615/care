@@ -11,6 +11,7 @@ import openpyxl
 from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for
 from flask_login import current_user, login_required
 from flask_wtf.csrf import CSRFError, CSRFProtect, generate_csrf
+from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
 from config import (
@@ -121,6 +122,18 @@ def _csrf_error(exc):
             recovery_hint="请刷新页面后重试；如果仍失败，请重新登录。",
         )
     return exc.description, 400
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def _request_too_large_error(exc):
+    if request.path.startswith("/api/"):
+        return _api_error(
+            "输入内容过长。",
+            status=413,
+            error_type="request_too_large",
+            recovery_hint="请缩短查房记录，或分段生成后再合并修改。",
+        )
+    return exc.description, 413
 
 
 @app.route("/healthz")

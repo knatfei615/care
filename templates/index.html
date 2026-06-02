@@ -956,7 +956,7 @@ async function generateNote() {
         row_idx: selectedPatient ? selectedPatient.row_idx : null,
       }),
     });
-    const data = await res.json();
+    const data = await readApiJson(res);
     if (data.error && !data.note) {
       toast(formatApiError(data), true);
     } else {
@@ -1053,6 +1053,25 @@ async function saveNote(forceOverwrite = false, skipStructureCheck = false) {
 /* ── Toast ── */
 function withCsrfHeaders(headers = {}) {
   return { "X-CSRFToken": csrfToken, ...headers };
+}
+
+async function readApiJson(res) {
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    return await res.json();
+  }
+
+  const body = await res.text();
+  const statusText = res.status ? `HTTP ${res.status}` : "未知状态";
+  if (res.status === 413) {
+    throw new Error(`服务器返回 ${statusText}：输入内容过长，请缩短后重试`);
+  }
+  if ([502, 503, 504].includes(res.status)) {
+    throw new Error(`服务器返回 ${statusText}：AI 生成耗时过长或服务暂时不可用，请稍后重试或缩短输入`);
+  }
+
+  const preview = body.replace(/\s+/g, " ").slice(0, 60);
+  throw new Error(`服务器返回非 JSON 响应（${statusText}）${preview ? `：${preview}` : ""}`);
 }
 
 function toast(msg, isError) {
