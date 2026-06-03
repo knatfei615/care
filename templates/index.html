@@ -295,7 +295,7 @@ const TYPES = ["药学查房", "药物重整", "药学监护", "用药咨询", "
 
 /* ── Init ── */
 document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("dateInput").value = new Date().toISOString().slice(0, 10);
+  document.getElementById("dateInput").value = todayDateValue();
   initPills("levelGroup", LEVELS, "二级监护");
   initPills("typeGroup", TYPES, "药学监护");
   refreshEditingState();
@@ -439,6 +439,7 @@ async function loadPatients() {
     updatePatientSummary();
     populateMedications(selectedPatient);
     if (selectedPatient) {
+      applyDefaultRecordDate(selectedPatient);
       loadSlotStatuses();
     } else {
       slotStatuses = [];
@@ -571,6 +572,7 @@ function selectPatient(rowIdx) {
   renderPatients();
   updatePatientSummary();
   populateMedications(selectedPatient);
+  applyDefaultRecordDate(selectedPatient);
   renderPatientTrackingCard();
   loadSlotStatuses();
   // Apply previous defaults
@@ -892,6 +894,23 @@ function compareDateText(a, b) {
   if (!da) return -1;
   if (!db) return 1;
   return da - db;
+}
+
+function todayDateValue() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function normalizeDateInputValue(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})日?$/);
+  return match ? `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}` : "";
+}
+
+function applyDefaultRecordDate(patient) {
+  const admissionDate = patient && patient.status === "no_record"
+    ? normalizeDateInputValue(patient.admission_date)
+    : "";
+  document.getElementById("dateInput").value = admissionDate || todayDateValue();
 }
 
 function parseDateText(text) {

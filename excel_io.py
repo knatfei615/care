@@ -10,7 +10,7 @@ from io import BytesIO
 import json
 import threading
 from contextlib import suppress
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 import re
 from typing import Any
@@ -116,7 +116,7 @@ def get_patient_medications(wb_path: Path, row_idx: int) -> dict[str, str]:
 def set_patient_medications(wb_path: Path, row_idx: int, medications: str) -> dict[str, str]:
     """Persist current medication orders for one patient row in a sidecar file."""
     medication_text = format_cell(medications).strip()[:2000]
-    updated_at = datetime.now().isoformat(timespec="seconds")
+    updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     row_key = str(row_idx)
 
     with _lock:

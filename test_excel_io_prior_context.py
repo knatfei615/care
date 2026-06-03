@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 import json
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 
@@ -73,6 +74,16 @@ class PatientMedicationsTest(unittest.TestCase):
         self.assertTrue(saved["updated_at"])
         self.assertEqual(one_row["medications"], "万古霉素 1g q12h IV")
         self.assertEqual(all_rows, {3: "万古霉素 1g q12h IV"})
+
+    def test_saves_medication_timestamp_with_timezone_offset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wb_path = Path(tmp) / "records.xlsm"
+
+            saved = set_patient_medications(wb_path, 3, "万古霉素 1g q12h IV")
+
+        saved_at = datetime.fromisoformat(saved["updated_at"])
+        self.assertIsNotNone(saved_at.tzinfo)
+        self.assertIsNotNone(saved_at.utcoffset())
 
     def test_missing_medication_sidecar_returns_empty_payload(self):
         with tempfile.TemporaryDirectory() as tmp:
